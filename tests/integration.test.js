@@ -1,0 +1,103 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import sharp from 'sharp';
+import yazl from 'yazl';
+import { command, ffmpeg, ffprobe } from '../server/media.js';
+import { renderVideo } from '../server/render.js';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const base = 'http://127.0.0.1:5191';
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+test('real MP3 + nested ZIP import, shader render, MP4 encoding and stereo verification', { timeout: 240000 }, async t => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'musicframe-render-'));
+  const audioPath = path.join(temporary, 'stereo.mp3');
+  await command(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', '-f', 'lavfi', '-i', 'sine=frequency=880:duration=2', '-filter_complex', '[0:a][1:a]amerge=inputs=2[a]', '-map', '[a]', '-c:a', 'libmp3lame', '-b:a', '192k', audioPath]);
+  const picture = await sharp({ create: { width: 640, height: 360, channels: 3, background: '#173c65' } }).composite([{ input: Buffer.from('<svg width="640" height="360"><rect x="80" y="80" width="180" height="180" fill="#c5f77d"/><circle cx="440" cy="180" r="100" fill="#b7a5ff"/></svg>') }]).png().toBuffer();
+  const zipPath = path.join(temporary, 'pictures.zip');
+  const zip = new yazl.ZipFile(); const out = createWriteStream(zipPath); const zipComplete = once(out, 'close');
+  zip.outputStream.pipe(out); zip.addBuffer(picture, 'photos/image10.png'); zip.addBuffer(picture, 'photos/image2.png'); zip.addBuffer(Buffer.from('ignore'), '__MACOSX/._test'); zip.end(); await zipComplete;
+  const server = spawn(process.execPath, ['server/index.js'], { cwd: root, windowsHide: true, env: { ...process.env, PORT: '5191', HOST: '127.0.0.1', DATA_DIR: path.join(temporary, 'data') }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let logs = ''; server.stdout.on('data', data => logs += data); server.stderr.on('data', data => logs += data);
+  t.after(async () => { server.kill(); await rm(temporary, { recursive: true, force: true }); });
+  let ready = false;
+  for (let i = 0; i < 80; i++) { try { const response = await fetch(base + '/api/status'); if (response.ok) { ready = true; break; } } catch {} await wait(250); }
+  assert.ok(ready, logs);
+  assert.equal(await (await fetch(base + '/api/reference')).json(), null, 'An isolated studio should have no reference sources.');
+  const form = new FormData(); form.append('audio', new Blob([await readFile(audioPath)]), 'stereo.mp3'); form.append('images', new Blob([await readFile(zipPath)]), 'pictures.zip');
+  const response = await fetch(base + '/api/projects', { method: 'POST', body: form });
+  assert.equal(response.status, 202, await response.clone().text());
+  let project = await response.json();
+  for (let i = 0; i < 120 && project.status === 'processing'; i++) { await wait(250); project = await (await fetch(`${base}/api/projects/${project.id}`)).json(); }
+  assert.equal(project.status, 'ready', project.error || logs);
+  assert.equal(project.audio.channels, 2);
+  const analysis=await (await fetch(base+project.analysisUrl)).json();
+  assert.equal(analysis.spectrum.bands,64);
+  assert.equal(analysis.analyzer.bands,160);
+  const stereo=analysis.analyzer.frames[30].map(v=>Buffer.from(v,'base64'));
+  const atFrequency=hz=>Math.floor(Math.log(hz/30)/Math.log(20000/30)*160);
+  assert.ok(stereo[0][atFrequency(440)]>stereo[1][atFrequency(440)]+50);
+  assert.ok(stereo[1][atFrequency(880)]>stereo[0][atFrequency(880)]+50);
+  for(const hz of [440,880]){
+    const expected=Math.floor(Math.log(hz/40)/Math.log(10000/40)*64);
+    assert.ok(analysis.spectrum.frames[30].slice(expected-1,expected+2).some(v=>v>.5),'Stereo tone must appear in its measured spectral neighborhood.');
+  }
+  assert.deepEqual(project.images.map(image => image.name), ['image2.png', 'image10.png']);
+  assert.ok(project.config.imageSeconds <= project.audio.duration / project.images.length, 'Short songs should fit all imported images in the timeline.');
+  assert.equal(project.images[0].width, 640);
+  assert.equal((await fetch(base + project.images[0].url)).status, 200);
+  await writeFile(path.join(temporary, 'data', 'reference-sources.json'), JSON.stringify({ projectId: project.id, audio: audioPath, images: zipPath }));
+  const reference = await (await fetch(base + '/api/reference')).json();
+  assert.equal(reference.project.id, project.id, 'All browsers should receive the same prepared reference session.');
+  assert.equal(reference.audioName, 'stereo.mp3');
+  assert.equal(reference.imagesName, 'pictures.zip');
+  assert.equal(reference.project.images.length, 2);
+  assert.ok(analysis.spectrum.frames[30][0]<.05,'Tones at 440/880 Hz must not invent sub-bass energy.');
+  const saveResponse = await fetch(base + '/api/saved-settings/led', { method: 'PUT', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify({ projectId: project.id, config: { ...project.config, preset: 'led', ledSpacing: 9, ledFill: .29, sensitivity: 1.65 } }) });
+  assert.equal(saveResponse.status, 200, await saveResponse.clone().text());
+  const savedRecord = await saveResponse.json();
+  const independentClient = await (await fetch(base + '/api/saved-settings', { headers: { Origin: base } })).json();
+  assert.deepEqual(independentClient.presets.led, savedRecord, 'A second LAN client should receive the exact saved settings.');
+  assert.equal(savedRecord.config.ledSpacing, 9);
+  const badSave = await fetch(base + '/api/saved-settings/led', { method: 'PUT', headers: { 'Content-Type': 'application/json', Origin: 'http://untrusted.example' }, body: JSON.stringify({ projectId: project.id, config: { ...project.config, preset: 'led' } }) });
+  assert.equal(badSave.status, 403);
+  const csrf = await fetch(`${base}/api/projects/${project.id}/config`, { method: 'PUT', headers: { Origin: 'http://untrusted.example', 'Content-Type': 'application/json' }, body: '{}' }); assert.equal(csrf.status, 403);
+  const unsupported = await fetch(`${base}/api/projects/${project.id}/exports`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: 'fosfora' }) }); assert.equal(unsupported.status, 400);
+  const renderConfig = { ...project.config, preset: 'stereoGlow', glowBands: 160, glowOpacity: 1, glowSpace: .4, glowSmoothing: .65, glowFloor: 65, glowStereo: 1, intensity: 0, zoom: 0, distortion: 0, rgb: 0 };
+  const start = await fetch(`${base}/api/projects/${project.id}/exports`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(renderConfig) });
+  assert.equal(start.status, 202, await start.clone().text());
+  let job = await start.json();
+  for (let i = 0; i < 400 && ['starting', 'rendering', 'encoding'].includes(job.status); i++) { await wait(400); job = await (await fetch(`${base}/api/exports/${job.id}`)).json(); }
+  assert.equal(job.status, 'completed', JSON.stringify(job) + logs);
+  const mp4 = await (await fetch(base + job.downloadUrl)).arrayBuffer();
+  const resultPath = path.join(temporary, 'output.mp4'); await writeFile(resultPath, Buffer.from(mp4));
+  const probe = JSON.parse(await command(ffprobe, ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', resultPath]));
+  const video = probe.streams.find(stream => stream.codec_type === 'video'); const audio = probe.streams.find(stream => stream.codec_type === 'audio');
+  assert.equal(video.width, 1920); assert.equal(video.height, 1080); assert.equal(video.codec_name, 'h264'); assert.equal(video.pix_fmt, 'yuv420p');
+  assert.equal(video.avg_frame_rate, '60/1'); assert.equal(video.level, 42); assert.equal(video.profile, 'High');
+  assert.equal(audio.channels, 2); assert.equal(audio.sample_rate, '48000'); assert.ok(Math.abs(Number(probe.format.duration) - project.audio.duration) < .12);
+  const raw = await command(ffmpeg, ['-v', 'error', '-i', resultPath, '-t', '1', '-f', 'f32le', '-acodec', 'pcm_f32le', '-ar', '48000', 'pipe:1']);
+  const samples = new Float32Array(raw.buffer, raw.byteOffset, raw.byteLength / 4);
+  let difference = 0; let energy = 0;
+  for (let i = 0; i < samples.length - 1; i += 2) { difference += (samples[i] - samples[i + 1]) ** 2; energy += samples[i] ** 2 + samples[i + 1] ** 2; }
+  assert.ok(difference / energy > .5, 'The stereo channels must remain distinct, not collapsed to mono.');
+  const frame = await command(ffmpeg, ['-v', 'error', '-i', resultPath, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', 'pipe:1']);
+  const stats = await sharp(frame).stats();
+  assert.ok(stats.channels.some(channel => channel.stdev > 20), 'The shader output should contain the image, not a black frame.');
+  // A nonblack image alone cannot detect a missing effect in the compositor.
+  const bypassPath = path.join(temporary, 'bypass.mp4');
+  await renderVideo({ job: {}, project: { ...project, audioPath, audio: { ...project.audio, duration: 1 / 30 } }, config: { ...renderConfig, glowOpacity: 0 }, output: bypassPath, baseUrl: base });
+  const bypassFrame = await command(ffmpeg, ['-v', 'error', '-i', bypassPath, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', 'pipe:1']);
+  const activePixels = await sharp(frame).removeAlpha().raw().toBuffer();
+  const bypassPixels = await sharp(bypassFrame).removeAlpha().raw().toBuffer();
+  let pixelDifference = 0;
+  for (let i = 0; i < activePixels.length; i++) pixelDifference += Math.abs(activePixels[i] - bypassPixels[i]);
+  assert.ok(pixelDifference / activePixels.length > .5, 'Transparent spectrum must visibly overlay the photo.');
+  console.log(`Verified ${video.width}x${video.height}, ${audio.channels}ch, ${probe.format.duration}s, ${Math.round(mp4.byteLength / 1024)} KiB.`);
+});

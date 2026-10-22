@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b0d12"><title>MusicFrame Render — Studio visuel</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="importmap">{"imports":{"three":"/lib/three/build/three.module.js"}}</script>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="brand" aria-label="MusicFrame Render, accueil"><span class="brand-mark" aria-hidden="true">≋</span><span>MUSICFRAME<span class="brand-light">RENDER</span><small>STUDIO VISUEL / 01</small></span></a>
+    <div class="session-name"><span class="small-label">PROJET</span><strong id="project-name">Nouvelle session</strong></div>
+    <div class="top-actions"><button id="lan-button" class="quiet-button"><span class="status-dot"></span> Accès LAN</button><button id="export-button" class="button primary" disabled><span aria-hidden="true">↗</span> Exporter la vidéo</button></div>
+  </header>
+  <main class="studio">
+    <aside class="media-panel panel">
+      <div class="panel-heading"><h2>Vos sources</h2><span class="small-label">01 / IMPORT</span></div>
+      <p class="muted intro">Les mêmes sources pour comparer chaque modèle.</p>
+      <div id="reference-sources" class="reference-sources" hidden>
+        <span class="section-label">SOURCES DE TEST PAR DÉFAUT</span>
+        <p id="reference-files"></p>
+        <button id="reference-button" class="button">Utiliser les sources de test <span>↺</span></button>
+      </div>
+      <details id="manual-sources" class="source-options" open><summary>Changer les fichiers</summary>
+      <label class="dropzone" id="audio-zone" tabindex="0" role="button" aria-label="Choisir un MP3">
+        <input id="audio-input" type="file" accept=".mp3,audio/mpeg" hidden>
+        <span class="drop-icon" aria-hidden="true">♫</span><strong id="audio-label">Déposez votre MP3</strong><span class="drop-hint">ou cliquez pour parcourir</span><small>PISTE AUDIO · MP3</small>
+      </label>
+      <label class="dropzone" id="zip-zone" tabindex="0" role="button" aria-label="Choisir un ZIP d’images">
+        <input id="zip-input" type="file" accept=".zip,application/zip" hidden>
+        <span class="drop-icon image-icon" aria-hidden="true">▧</span><strong id="zip-label">Déposez vos images</strong><span class="drop-hint">dans une archive .zip</span><small>JPG · PNG · WEBP</small>
+      </label>
+      <button id="import-button" class="button import-button" disabled>Préparer la session <span>→</span></button>
+      </details>
+      <div id="import-status" class="inline-status" role="status" hidden></div>
+      <div class="source-details" id="source-details" hidden><div><span>Durée</span><strong id="source-duration">—</strong></div><div><span>Audio source</span><strong id="source-channels">—</strong></div><div><span>Images</span><strong id="source-count">—</strong></div></div>
+      <details class="source-options recent-block"><summary>Autres sessions</summary><select id="recent-projects" aria-label="Ouvrir une session récente"><option value="">Choisir une session…</option></select></details>
+      <div class="local-note"><span aria-hidden="true">⌂</span><p>Tout reste sur votre machine.<br><span>Aucun envoi vers le cloud.</span></p></div>
+    </aside>
+
+    <section class="stage-panel">
+      <div class="stage-heading"><div><span class="eyebrow">VOTRE MUSIQUE, EN MOUVEMENT</span><h1>Faites vibrer vos images.</h1></div><span class="preview-badge"><span class="status-dot"></span> APERÇU DIRECT</span></div>
+      <div class="preview-shell" id="preview-shell">
+        <div class="stage-corners" aria-hidden="true"></div>
+        <canvas id="preview" width="960" height="540" aria-label="Prévisualisation du visualiseur audio" hidden></canvas>
+        <div class="empty-preview" id="empty-preview">
+          <div class="signal-orbit" aria-hidden="true"><i></i><i></i><i></i><i></i><span>SF</span></div>
+          <strong>Le son donne le rythme.<br>L’image prend vie.</strong><p>Importez un MP3 et votre ZIP pour commencer.</p>
+        </div>
+        <div class="preview-meta"><span id="preview-preset">ASTROFOX / MATRICE LED</span><span>16:9 <i></i> 1920 × 1080</span></div>
+        <button id="fullscreen-button" class="fullscreen-button" aria-label="Agrandir l’aperçu" title="Agrandir l’aperçu">⛶</button>
+      </div>
+      <div class="transport">
+        <button id="restart-button" class="transport-button" aria-label="Revenir au début" disabled>↤</button>
+        <button id="play-button" class="play-button" aria-label="Lire" disabled>▶</button>
+        <span id="current-time" class="time-label">00:00</span>
+        <div class="wave-track"><canvas id="waveform" aria-hidden="true"></canvas><input id="seek" type="range" min="0" max="100" step="0.01" value="0" aria-label="Position de lecture" disabled></div>
+        <span id="duration" class="time-label">00:00</span>
+        <label class="volume-label"><span aria-hidden="true">◖))</span><input id="volume" type="range" min="0" max="1" step="0.01" value="0.8" aria-label="Volume de l’aperçu"></label>
+      </div>
+      <div class="energy-strip"><span class="small-label">ÉNERGIE AUDIO</span><div><span>GRAVES</span><i><b id="bass-meter"></b></i></div><div><span>MÉDIUMS</span><i><b id="mid-meter"></b></i></div><div><span>AIGUS</span><i><b id="high-meter"></b></i></div></div>
+      <div class="preview-performance"><label>Aperçu<select id="preview-mode" aria-label="Mode de l’aperçu"><option value="adjust">Réglage léger · 30 i/s</option><option value="responsive">Réactif · vise 60 i/s</option><option value="detailed">Détaillé · vise 30 i/s</option></select></label><span id="preview-stats">En pause</span></div>
+      <p id="preview-help" class="muted">Aperçu léger pour ajuster les réglages · export final en 1080p.</p>
+      <section class="image-library"><div class="library-heading"><h2>Images de la session <span id="image-count">0</span></h2><span id="image-timing" class="muted">Ordre naturel des fichiers</span></div><div id="image-list" class="image-list"><div class="empty-library">Vos images apparaîtront ici après l’import.</div></div></section>
+      <div class="stage-footer"><span><span class="status-dot"></span> <span id="engine-status">Studio prêt</span></span><span>RENDU FINAL · 1080P · STÉRÉO</span></div>
+    </section>
+
+    <aside class="effects-panel panel">
+      <div class="panel-heading"><h2>Direction visuelle</h2><span class="small-label">02 / CRÉATION</span></div>
+      <div class="engine-card"><span class="engine-monogram">A<span>↗</span></span><div><strong id="visual-source">Astrofox</strong><small id="visual-description">Effets d’image</small></div><span class="engine-ready">ACTIF</span></div>
+      <div class="section-label presets-label">MODÈLES</div>
+      <div class="preset-grid" role="group" aria-label="Modèles visuels">
+        <button class="preset" data-preset="orbit"><span class="preset-art art-orbit" aria-hidden="true"></span><strong>Rotation orbitale</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="dataGrains"><span class="preset-art art-data-grains" aria-hidden="true"></span><strong>Essaim de données</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="holo"><span class="preset-art art-holo" aria-hidden="true"></span><strong>Strates holographiques</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="stereoGlow"><span class="preset-art art-stereo-glow" aria-hidden="true"></span><strong>Stereo glow</strong><small>Nouveau · À essayer</small></button>
+        <button class="preset active" data-preset="led"><span class="preset-art art-led" aria-hidden="true"></span><strong>Matrice LED</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="relief"><span class="preset-art art-relief" aria-hidden="true"></span><strong>Relief granulaire</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="dither"><span class="preset-art art-dither" aria-hidden="true"></span><strong>Trame numérique</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="pixelsort"><span class="preset-art art-pixelsort" aria-hidden="true"></span><strong>Tri spectral</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="voxel"><span class="preset-art art-voxel" aria-hidden="true"></span><strong>Mosaïque voxel</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="ascii"><span class="preset-art art-ascii" aria-hidden="true"></span><strong>Écran matriciel</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="crt"><span class="preset-art art-crt" aria-hidden="true"></span><strong>Tube cathodique</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="stipple"><span class="preset-art art-stipple" aria-hidden="true"></span><strong>Pointillisme granulaire</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="morph"><span class="preset-art art-morph" aria-hidden="true"></span><strong>Morphose granulaire</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="cymatics"><span class="preset-art art-cymatics" aria-hidden="true"></span><strong>Cymatique photo</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="tessera"><span class="preset-art art-tessera" aria-hidden="true"></span><strong>Décodage numérique</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="fenestra"><span class="preset-art art-fenestra" aria-hidden="true"></span><strong>Fenêtres de signal</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="raster"><span class="preset-art art-raster" aria-hidden="true"></span><strong>Nuage numérique</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="codec"><span class="preset-art art-codec" aria-hidden="true"></span><strong>Codec granulaire</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="plexus"><span class="preset-art art-plexus" aria-hidden="true"></span><strong>Plexus photo</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="spectrum"><span class="preset-art art-spectrum" aria-hidden="true"></span><strong>Spectre granulaire</strong><small>✓ Sauvegardé</small></button>
+        <button class="preset" data-preset="chrono"><span class="preset-art art-chrono" aria-hidden="true"></span><strong>Scan temporel</strong><small>✓ Sauvegardé</small></button>
+      </div>
+      <p id="model-note" class="model-note">Conservé · Vos réglages Matrice LED sont sauvegardés sur le serveur.</p>
+      <div class="control-group"><div class="section-label">RÉACTION MUSICALE</div>
+        <label data-hide-model="stereoGlow" class="slider-control"><span>Intensité globale<output data-output="intensity">100 %</output></span><input data-config="intensity" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label data-hide-model="stereoGlow" class="slider-control"><span>Zoom sur les basses<output data-output="zoom">100 %</output></span><input data-config="zoom" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label data-hide-model="stereoGlow" class="slider-control"><span>Sensibilité<output data-output="sensitivity">1.95×</output></span><input data-config="sensitivity" type="range" min="0.25" max="3" step="0.05" value="1.95"></label>
+        <label data-hide-model="stereoGlow" class="slider-control"><span>Réactivité générale</span><select data-config="audioResponse"><option value="balanced-v1">Intermédiaire (recommandée)</option><option value="adaptive-v1">Adaptée au morceau · douce</option><option value="legacy">Originale</option></select></label>
+        <label class="slider-control" data-model="dither" hidden><span>Réaction de la trame<output data-output="ditherReaction">80 %</output></span><input data-config="ditherReaction" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+      </div>
+      <div class="control-group"><div class="section-label">TRANSFORMATION</div>
+        <label class="slider-control" data-model="orbit" hidden><span>Mouvement de rotation</span><select data-config="orbitMode"><option value="0">Va-et-vient doux</option><option value="1">Rotation continue</option></select></label>
+        <label class="slider-control" data-model="orbit" hidden><span>Amplitude de rotation<output data-output="orbitAmplitude"></output></span><input data-config="orbitAmplitude" type="range" min="0" max="20" step="0.25" value="7"></label>
+        <label class="slider-control" data-model="orbit" hidden><span>Impulsion sur les kicks<output data-output="orbitKick"></output></span><input data-config="orbitKick" type="range" min="0" max="10" step="0.25" value="2.5"></label>
+        <label class="slider-control" data-model="orbit" hidden><span>Centre horizontal<output data-output="orbitCenterX"></output></span><input data-config="orbitCenterX" type="range" min="0.2" max="0.8" step="0.01" value="0.5"></label>
+        <label class="slider-control" data-model="orbit" hidden><span>Centre vertical<output data-output="orbitCenterY"></output></span><input data-config="orbitCenterY" type="range" min="0.2" max="0.8" step="0.01" value="0.5"></label>
+        <label class="slider-control" data-model="orbit" hidden><span>Texture granulaire<output data-output="orbitGrain"></output></span><input data-config="orbitGrain" type="range" min="0" max="1" step="0.01" value="0.3"></label>
+        <label class="slider-control" data-model="orbit" hidden><span>Retour après impulsion<output data-output="orbitReturn"></output></span><input data-config="orbitReturn" type="range" min="0.16" max="0.8" step="0.01" value="0.38"></label>
+        <label class="slider-control" data-model="orbit" hidden><span>Réaction aux kicks<output data-output="orbitReaction"></output></span><input data-config="orbitReaction" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="slider-control" data-model="dataGrains" hidden><span>Finesse des microfragments<output data-output="dataDensity"></output></span><input data-config="dataDensity" type="range" min="160" max="800" step="1" value="480"></label>
+        <label class="slider-control" data-model="dataGrains" hidden><span>Taille des grains<output data-output="dataSize"></output></span><input data-config="dataSize" type="range" min="0.2" max="1.5" step="0.01" value="0.65"></label>
+        <label class="slider-control" data-model="dataGrains" hidden><span>Jets sur les kicks<output data-output="dataFlow"></output></span><input data-config="dataFlow" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+        <label class="slider-control" data-model="dataGrains" hidden><span>Écart entre les plans<output data-output="dataDepth"></output></span><input data-config="dataDepth" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+        <label class="slider-control" data-model="dataGrains" hidden><span>Traînées de données<output data-output="dataTrail"></output></span><input data-config="dataTrail" type="range" min="0" max="1" step="0.01" value="0.65"></label>
+        <label class="slider-control" data-model="dataGrains" hidden><span>Teinte cyan<output data-output="dataTint"></output></span><input data-config="dataTint" type="range" min="0" max="1" step="0.01" value="0.35"></label>
+        <label class="slider-control" data-model="dataGrains" hidden><span>Photo de fond<output data-output="dataBackground"></output></span><input data-config="dataBackground" type="range" min="0" max="1" step="0.005" value="0.035"></label>
+        <label class="slider-control" data-model="dataGrains" hidden><span>Retour après impact<output data-output="dataReturn"></output></span><input data-config="dataReturn" type="range" min="0.08" max="0.5" step="0.01" value="0.22"></label>
+        <label class="slider-control" data-model="dataGrains" hidden><span>Réaction à la musique<output data-output="dataReaction"></output></span><input data-config="dataReaction" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="slider-control" data-model="holo" hidden><span>Nombre de strates<output data-output="holoLayers"></output></span><input data-config="holoLayers" type="range" min="4" max="48" step="1" value="16"></label>
+        <label class="slider-control" data-model="holo" hidden><span>Profondeur des strates<output data-output="holoDepth"></output></span><input data-config="holoDepth" type="range" min="0" max="1" step="0.01" value="0.6"></label>
+        <label class="slider-control" data-model="holo" hidden><span>Réaction à la musique<output data-output="holoReaction"></output></span><input data-config="holoReaction" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="slider-control" data-model="holo" hidden><span>Perspective 3D<output data-output="holoOrbit"></output></span><input data-config="holoOrbit" type="range" min="0" max="1" step="0.01" value="0.65"></label>
+        <label class="slider-control" data-model="holo" hidden><span>Présence de la photo<output data-output="holoPhoto"></output></span><input data-config="holoPhoto" type="range" min="0" max="1" step="0.01" value="0.85"></label>
+        <label class="slider-control" data-model="holo" hidden><span>Contours lumineux<output data-output="holoLines"></output></span><input data-config="holoLines" type="range" min="0" max="1" step="0.01" value="0.55"></label>
+        <label class="slider-control" data-model="holo" hidden><span>Teinte holographique<output data-output="holoTint"></output></span><input data-config="holoTint" type="range" min="0" max="1" step="0.01" value="0.4"></label>
+        <label class="slider-control" data-model="holo" hidden><span>Balayage numérique<output data-output="holoScan"></output></span><input data-config="holoScan" type="range" min="0" max="1" step="0.01" value="0.2"></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Visualisation sous le spectre</span><select data-config="glowPhoto"><option value="0">Photo seule</option><option value="2">Matrice LED</option><option value="3">Relief granulaire</option><option value="4">Trame numérique</option><option value="5">Tri spectral</option><option value="6">Mosaïque voxel</option><option value="7">Écran matriciel</option><option value="8">Tube cathodique</option><option value="9">Pointillisme granulaire</option><option value="11">Morphose granulaire</option><option value="12">Cymatique photo</option><option value="13">Décodage numérique</option><option value="14">Fenêtres de signal</option><option value="16">Nuage numérique</option><option value="18">Codec granulaire</option><option value="19">Plexus photo</option><option value="20">Spectre granulaire</option><option value="21">Scan temporel</option><option value="23">Strates holographiques</option><option value="29">Essaim de données</option><option value="30">Rotation orbitale</option></select></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Bandes de fréquences</span><select data-config="glowBands"><option value="10">10</option><option value="20">20</option><option value="40">40</option><option value="80">80</option><option value="160">160</option></select></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Espacement des barres<output data-output="glowSpace"></output></span><input data-config="glowSpace" type="range" min="0" max="0.9" step="0.01" value="0.4"></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Lueur<output data-output="glowLight"></output></span><input data-config="glowLight" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Hauteur du spectre<output data-output="glowHeight"></output></span><input data-config="glowHeight" type="range" min="0.1" max="1" step="0.01" value="0.32"></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Position verticale · haut → bas<output data-output="glowPosition"></output></span><input data-config="glowPosition" type="range" min="0" max="1" step="0.01" value="0.92"></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Opacité du spectre<output data-output="glowOpacity"></output></span><input data-config="glowOpacity" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Gain du spectre<output data-output="glowGain"></output></span><input data-config="glowGain" type="range" min="0.25" max="3" step="0.05" value="1"></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Seuil de bruit<output data-output="glowFloor"></output></span><input data-config="glowFloor" type="range" min="0" max="240" step="1" value="65"></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Lissage temporel<output data-output="glowSmoothing"></output></span><input data-config="glowSmoothing" type="range" min="0" max="0.95" step="0.01" value="0.65"></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Décroissance des crêtes<output data-output="glowPeakDrop"></output></span><input data-config="glowPeakDrop" type="range" min="0.9" max="0.999" step="0.001" value="0.99"></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Stéréo gauche / droite</span><select data-config="glowStereo"><option value="0">OFF</option><option value="1">ON</option></select></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Barres LED</span><select data-config="glowLed"><option value="0">OFF</option><option value="1">ON</option></select></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Barres lumineuses</span><select data-config="glowLumi"><option value="0">OFF</option><option value="1">ON</option></select></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Disposition circulaire</span><select data-config="glowRadial"><option value="0">OFF</option><option value="1">ON</option></select></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Afficher les crêtes</span><select data-config="glowPeaks"><option value="0">OFF</option><option value="1">ON</option></select></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Dégradé</span><select data-config="glowGradient"><option value="0">Mono</option><option value="1">Aurora</option><option value="2">Classique</option><option value="3">Arc-en-ciel</option><option value="4">Bleu</option><option value="5">Prisme</option><option value="6">Coucher de soleil</option></select></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Direction du dégradé</span><select data-config="glowDirection"><option value="0">Horizontale</option><option value="1">Verticale</option></select></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Mode couleur</span><select data-config="glowColorMode"><option value="0">Dégradé</option><option value="1">Niveau de la barre</option></select></label>
+        <label class="slider-control" data-model="stereoGlow" hidden><span>Rotation</span><select data-config="glowRotation"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></label>
+
+
+
+
+        <label class="slider-control" data-model="chrono" hidden><span>Finesse du balayage<output data-output="chronoColumns"></output></span><input data-config="chronoColumns" type="range" min="40" max="1920" step="1" value="640"></label>
+        <label class="slider-control" data-model="chrono" hidden><span>Fenêtre temporelle<output data-output="chronoDelay"></output></span><input data-config="chronoDelay" type="range" min="0" max="1.5" step="0.01" value="0.24"></label>
+        <label class="slider-control" data-model="chrono" hidden><span>Décalage des bandes<output data-output="chronoShift"></output></span><input data-config="chronoShift" type="range" min="0" max="1" step="0.01" value="0.75"></label>
+        <label class="slider-control" data-model="chrono" hidden><span>Torsion temporelle<output data-output="chronoTwist"></output></span><input data-config="chronoTwist" type="range" min="0" max="1" step="0.01" value="0.6"></label>
+        <label class="slider-control" data-model="chrono" hidden><span>Décalage chromatique<output data-output="chronoChroma"></output></span><input data-config="chronoChroma" type="range" min="0" max="1" step="0.01" value="0.45"></label>
+        <label class="slider-control" data-model="chrono" hidden><span>Réaction musicale<output data-output="chronoReaction"></output></span><input data-config="chronoReaction" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="slider-control" data-model="spectrum" hidden><span>Finesse des microbarres<output data-output="specColumns"></output></span><input data-config="specColumns" type="range" min="40" max="960" step="1" value="240"></label>
+        <label class="slider-control" data-model="spectrum" hidden><span>Largeur des microbarres<output data-output="specFill"></output></span><input data-config="specFill" type="range" min="0" max="1" step="0.01" value="0.6"></label>
+        <label class="slider-control" data-model="spectrum" hidden><span>Déplacement spectral<output data-output="specTravel"></output></span><input data-config="specTravel" type="range" min="0" max="1" step="0.01" value="0.6"></label>
+        <label class="slider-control" data-model="spectrum" hidden><span>Éclat des fréquences<output data-output="specGlow"></output></span><input data-config="specGlow" type="range" min="0" max="1" step="0.01" value="0.45"></label>
+        <label class="slider-control" data-model="spectrum" hidden><span>Photo en arrière-plan<output data-output="specBackground"></output></span><input data-config="specBackground" type="range" min="0" max="1" step="0.01" value="0.08"></label>
+        <label class="slider-control" data-model="spectrum" hidden><span>Réaction musicale<output data-output="specReaction"></output></span><input data-config="specReaction" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="slider-control" data-model="plexus" hidden><span>Finesse du réseau<output data-output="plexDensity"></output></span><input data-config="plexDensity" type="range" min="80" max="480" step="10" value="160"></label>
+        <label class="slider-control" data-model="plexus" hidden><span>Taille des particules<output data-output="plexSize"></output></span><input data-config="plexSize" type="range" min="0.15" max="1.4" step="0.01" value="0.42"></label>
+        <label class="slider-control" data-model="plexus" hidden><span>Lumière des connexions<output data-output="plexLinks"></output></span><input data-config="plexLinks" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+        <label class="slider-control" data-model="plexus" hidden><span>Écartement musical<output data-output="plexSpread"></output></span><input data-config="plexSpread" type="range" min="0" max="1" step="0.01" value="0.4"></label>
+        <label class="slider-control" data-model="plexus" hidden><span>Portée des connexions<output data-output="plexReach"></output></span><input data-config="plexReach" type="range" min="0.5" max="3" step="0.05" value="2.2"></label>
+        <label class="slider-control" data-model="plexus" hidden><span>Photo en arrière-plan<output data-output="plexBackground"></output></span><input data-config="plexBackground" type="range" min="0" max="1" step="0.01" value="0.12"></label>
+        <label class="slider-control" data-model="codec" hidden><span>Compression artistique<output data-output="codecCrush"></output></span><input data-config="codecCrush" type="range" min="0" max="1" step="0.01" value="0.85"></label>
+        <label class="slider-control" data-model="codec" hidden><span>Finesse des cellules<output data-output="codecColumns"></output></span><input data-config="codecColumns" type="range" min="40" max="960" step="1" value="240"></label>
+        <label class="slider-control" data-model="codec" hidden><span>Décalage des cellules<output data-output="codecShift"></output></span><input data-config="codecShift" type="range" min="0" max="1" step="0.01" value="0.4"></label>
+        <label class="slider-control" data-model="codec" hidden><span>Dispersion chromatique<output data-output="codecChroma"></output></span><input data-config="codecChroma" type="range" min="0" max="1" step="0.01" value="0.35"></label>
+        <label class="slider-control" data-model="codec" hidden><span>Réaction musicale<output data-output="codecReaction"></output></span><input data-config="codecReaction" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="slider-control" data-model="codec" hidden><span>Mélange de l’effet<output data-output="codecMix"></output></span><input data-config="codecMix" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="slider-control" data-model="raster" hidden><span>Densité des grains<output data-output="rasterDensity"></output></span><input data-config="rasterDensity" type="range" min="100" max="640" step="10" value="400"></label>
+        <label class="slider-control" data-model="raster" hidden><span>Taille des grains<output data-output="rasterSize"></output></span><input data-config="rasterSize" type="range" min="0.15" max="1.4" step="0.01" value="0.65"></label>
+        <label class="slider-control" data-model="raster" hidden><span>Dispersion des attaques<output data-output="rasterScatter"></output></span><input data-config="rasterScatter" type="range" min="0" max="1" step="0.01" value="0.6"></label>
+        <label class="slider-control" data-model="raster" hidden><span>Expansion sur les basses<output data-output="rasterRadial"></output></span><input data-config="rasterRadial" type="range" min="0" max="1" step="0.01" value="0.35"></label>
+        <label class="slider-control" data-model="raster" hidden><span>Vibration des médiums<output data-output="rasterWave"></output></span><input data-config="rasterWave" type="range" min="0" max="1" step="0.01" value="0.1"></label>
+        <label class="slider-control" data-model="raster" hidden><span>Photo en arrière-plan<output data-output="rasterBackground"></output></span><input data-config="rasterBackground" type="range" min="0" max="1" step="0.01" value="0.1"></label>
+
+
+        <label class="slider-control" data-model="fenestra" hidden><span>Nombre de fenêtres<output data-output="panelCount"></output></span><input data-config="panelCount" type="range" min="1" max="48" step="1" value="8"></label>
+        <label class="slider-control" data-model="fenestra" hidden><span>Agrandissement des détails<output data-output="panelMagnify"></output></span><input data-config="panelMagnify" type="range" min="0" max="1" step="0.01" value="0.75"></label>
+        <label class="slider-control" data-model="fenestra" hidden><span>Cadres lumineux<output data-output="panelEdges"></output></span><input data-config="panelEdges" type="range" min="0" max="1" step="0.01" value="0.65"></label>
+        <label class="slider-control" data-model="fenestra" hidden><span>Connexions entre fenêtres<output data-output="panelLinks"></output></span><input data-config="panelLinks" type="range" min="0" max="1" step="0.01" value="0.6"></label>
+        <label class="slider-control" data-model="fenestra" hidden><span>Photo en arrière-plan<output data-output="panelBackground"></output></span><input data-config="panelBackground" type="range" min="0" max="1" step="0.01" value="0.55"></label>
+        <label class="slider-control" data-model="fenestra" hidden><span>Réaction musicale<output data-output="panelReaction"></output></span><input data-config="panelReaction" type="range" min="0" max="1" step="0.01" value="1"></label>
+
+        <label class="slider-control" data-model="tessera" hidden><span>Finesse de la grille<output data-output="tileColumns"></output></span><input data-config="tileColumns" type="range" min="12" max="480" step="1" value="48"></label>
+        <label class="slider-control" data-model="tessera" hidden><span>Obscurité des cellules fermées<output data-output="tileObscure"></output></span><input data-config="tileObscure" type="range" min="0" max="1" step="0.01" value="0.85"></label>
+        <label class="slider-control" data-model="tessera" hidden><span>Contours électroniques<output data-output="tileEdges"></output></span><input data-config="tileEdges" type="range" min="0" max="1" step="0.01" value="0.7"></label>
+        <label class="slider-control" data-model="tessera" hidden><span>Accents lumineux<output data-output="tileFlash"></output></span><input data-config="tileFlash" type="range" min="0" max="1" step="0.01" value="0.6"></label>
+        <label class="slider-control" data-model="tessera" hidden><span>Réaction musicale<output data-output="tileReaction"></output></span><input data-config="tileReaction" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="palette-control" data-model="tessera" hidden><span>Ordre de décodage</span><select data-config="tileDirection" aria-label="Ordre de décodage"><option value="0">Dispersion numérique</option><option value="1">Balayage vertical</option><option value="2">Depuis le centre</option></select></label>
+
+
+
+        <label class="slider-control" data-model="led" hidden><span>Espacement des points<output data-output="ledSpacing">20 px</output></span><input data-config="ledSpacing" type="range" min="8" max="48" step="1" value="20"></label>
+        <label class="slider-control" data-model="led" hidden><span>Taille des points<output data-output="ledFill">70 %</output></span><input data-config="ledFill" type="range" min="0" max="1" step="0.01" value="0.7"></label>
+        <label class="slider-control" data-model="led" hidden><span>Douceur lumineuse<output data-output="ledGlow">45 %</output></span><input data-config="ledGlow" type="range" min="0" max="1" step="0.01" value="0.45"></label>
+        <label class="slider-control" data-model="relief" hidden><span>Densité des grains<output data-output="reliefDensity">220</output></span><input data-config="reliefDensity" type="range" min="100" max="300" step="10" value="220"></label>
+        <label class="slider-control" data-model="relief" hidden><span>Profondeur du relief<output data-output="reliefDepth">65 %</output></span><input data-config="reliefDepth" type="range" min="0" max="1" step="0.01" value="0.65"></label>
+        <label class="slider-control" data-model="relief" hidden><span>Taille des grains<output data-output="reliefSize">65 %</output></span><input data-config="reliefSize" type="range" min="0.2" max="1.4" step="0.01" value="0.65"></label>
+        <label class="slider-control" data-model="relief" hidden><span>Rotation du relief<output data-output="reliefOrbit">55 %</output></span><input data-config="reliefOrbit" type="range" min="0" max="1" step="0.01" value="0.55"></label>
+        <label class="slider-control" data-model="dither" hidden><span>Taille des pixels<output data-output="ditherPitch">4 px</output></span><input data-config="ditherPitch" type="range" min="2" max="12" step="1" value="4"></label>
+        <label class="slider-control" data-model="dither" hidden><span>Niveaux de couleur<output data-output="ditherLevels">4</output></span><input data-config="ditherLevels" type="range" min="2" max="8" step="1" value="4"></label>
+        <label class="slider-control" data-model="dither" hidden><span>Présence de la trame<output data-output="ditherMix">100 %</output></span><input data-config="ditherMix" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="slider-control" data-model="dither" hidden><span>Lignes d’écran<output data-output="ditherScan">30 %</output></span><input data-config="ditherScan" type="range" min="0" max="1" step="0.01" value="0.3"></label>
+        <label class="palette-control" data-model="dither" hidden><span>Palette de la trame</span><select data-config="ditherPalette" aria-label="Palette de la trame"><option value="0">Couleurs de la photo</option><option value="1" selected>Phosphore cyan</option><option value="2">Phosphore ambre</option></select></label>
+        <label class="slider-control" data-model="pixelsort" hidden><span>Seuil de luminosité<output data-output="sortThreshold">12 %</output></span><input data-config="sortThreshold" type="range" min="0" max="0.9" step="0.01" value="0.12"></label>
+        <label class="slider-control" data-model="pixelsort" hidden><span>Longueur des traînées<output data-output="sortLength">50 %</output></span><input data-config="sortLength" type="range" min="0.03" max="1" step="0.01" value="0.5"></label>
+        <label class="slider-control" data-model="pixelsort" hidden><span>Présence du tri<output data-output="sortMix">100 %</output></span><input data-config="sortMix" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="palette-control" data-model="pixelsort" hidden><span>Direction des traînées</span><select data-config="sortDirection" aria-label="Direction des traînées"><option value="0">Horizontale</option><option value="1" selected>Verticale</option></select></label>
+        <label class="palette-control" data-model="pixelsort" hidden><span>Ordre des pixels</span><select data-config="sortReverse" aria-label="Ordre des pixels"><option value="0" selected>Sombre → clair</option><option value="1">Clair → sombre</option></select></label>
+        <label class="slider-control" data-model="voxel" hidden><span>Densité des blocs<output data-output="voxelDensity">84</output></span><input data-config="voxelDensity" type="range" min="32" max="140" step="1" value="84"></label>
+        <label class="slider-control" data-model="voxel" hidden><span>Profondeur des blocs<output data-output="voxelDepth">65 %</output></span><input data-config="voxelDepth" type="range" min="0" max="1" step="0.01" value="0.65"></label>
+        <label class="slider-control" data-model="voxel" hidden><span>Largeur des blocs<output data-output="voxelFill">85 %</output></span><input data-config="voxelFill" type="range" min="0.3" max="1" step="0.01" value="0.85"></label>
+        <label class="slider-control" data-model="voxel" hidden><span>Inclinaison du relief<output data-output="voxelTilt">60 %</output></span><input data-config="voxelTilt" type="range" min="0" max="1" step="0.01" value="0.6"></label>
+        <label class="slider-control" data-model="voxel" hidden><span>Arêtes lumineuses<output data-output="voxelGlow">30 %</output></span><input data-config="voxelGlow" type="range" min="0" max="1" step="0.01" value="0.3"></label>
+        <label class="slider-control" data-model="ascii" hidden><span>Taille des caractères<output data-output="asciiSize">24 px</output></span><input data-config="asciiSize" type="range" min="8" max="48" step="1" value="24"></label>
+        <label class="slider-control" data-model="ascii" hidden><span>Densité des caractères<output data-output="asciiDensity">1.25×</output></span><input data-config="asciiDensity" type="range" min="0.5" max="2" step="0.05" value="1.25"></label>
+        <label class="slider-control" data-model="ascii" hidden><span>Réaction des caractères<output data-output="asciiReaction">85 %</output></span><input data-config="asciiReaction" type="range" min="0" max="1" step="0.01" value="0.85"></label>
+        <label class="slider-control" data-model="ascii" hidden><span>Lueur du phosphore<output data-output="asciiGlow">35 %</output></span><input data-config="asciiGlow" type="range" min="0" max="1" step="0.01" value="0.35"></label>
+        <label class="slider-control" data-model="ascii" hidden><span>Balayage des colonnes<output data-output="asciiRain">40 %</output></span><input data-config="asciiRain" type="range" min="0" max="1" step="0.01" value="0.4"></label>
+        <label class="palette-control" data-model="ascii" hidden><span>Couleurs du terminal</span><select data-config="asciiPalette" aria-label="Couleurs du terminal"><option value="0">Couleurs de la photo</option><option value="1" selected>Vert terminal</option><option value="2">Cyan</option><option value="3">Ambre</option></select></label>
+        <label data-hide-model="stereoGlow" class="slider-control"><span>Séparation RGB<output data-output="rgb">100 %</output></span><input data-config="rgb" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="slider-control" data-model="crt" hidden><span>Courbure du tube<output data-output="crtCurve"></output></span><input data-config="crtCurve" type="range" min="0" max="1" step="0.01" value="0.6"></label>
+        <label class="slider-control" data-model="crt" hidden><span>Lignes de balayage<output data-output="crtLines"></output></span><input data-config="crtLines" type="range" min="0" max="1" step="0.01" value="0.65"></label>
+        <label class="slider-control" data-model="crt" hidden><span>Lueur du tube<output data-output="crtGlow"></output></span><input data-config="crtGlow" type="range" min="0" max="1" step="0.01" value="0.65"></label>
+        <label class="slider-control" data-model="crt" hidden><span>Franges de couleur<output data-output="crtFringe"></output></span><input data-config="crtFringe" type="range" min="0" max="1" step="0.01" value="0.5"></label>
+        <label class="slider-control" data-model="crt" hidden><span>Bruit du signal<output data-output="crtNoise"></output></span><input data-config="crtNoise" type="range" min="0" max="1" step="0.01" value="0.15"></label>
+        <label class="slider-control" data-model="crt" hidden><span>Réaction du tube<output data-output="crtReaction"></output></span><input data-config="crtReaction" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="slider-control" data-model="stipple" hidden><span>Espacement des grains<output data-output="stippleSpacing"></output></span><input data-config="stippleSpacing" type="range" min="4" max="24" step="1" value="7"></label>
+        <label class="slider-control" data-model="stipple" hidden><span>Taille des grains<output data-output="stippleSize"></output></span><input data-config="stippleSize" type="range" min="0.12" max="0.45" step="0.01" value="0.28"></label>
+        <label class="slider-control" data-model="stipple" hidden><span>Densité tonale<output data-output="stippleDensity"></output></span><input data-config="stippleDensity" type="range" min="0.5" max="2" step="0.05" value="1.3"></label>
+        <label class="slider-control" data-model="stipple" hidden><span>Réaction des grains<output data-output="stippleReaction"></output></span><input data-config="stippleReaction" type="range" min="0" max="1" step="0.01" value="1"></label>
+        <label class="slider-control" data-model="stipple" hidden><span>Vibration des grains<output data-output="stippleScatter"></output></span><input data-config="stippleScatter" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+        <label class="slider-control" data-model="stipple" hidden><span>Photo en arrière-plan<output data-output="stippleBackground"></output></span><input data-config="stippleBackground" type="range" min="0" max="1" step="0.01" value="0.06"></label>
+        <label class="palette-control" data-model="stipple" hidden><span>Couleurs des grains</span><select data-config="stipplePalette" aria-label="Couleurs des grains"><option value="0">Couleurs de la photo</option><option value="1" selected>Cyan</option><option value="2">Blanc lumineux</option><option value="3">Ambre</option></select></label>
+        <label class="slider-control" data-model="morph" hidden><span>Densité des particules<output data-output="morphDensity"></output></span><input data-config="morphDensity" type="range" min="100" max="360" step="10" value="240"></label>
+        <label class="slider-control" data-model="morph" hidden><span>Taille des particules<output data-output="morphSize"></output></span><input data-config="morphSize" type="range" min="0.2" max="1.4" step="0.01" value="0.85"></label>
+        <label class="slider-control" data-model="morph" hidden><span>Dispersion musicale<output data-output="morphScatter"></output></span><input data-config="morphScatter" type="range" min="0" max="1" step="0.01" value="0.45"></label>
+        <label class="slider-control" data-model="morph" hidden><span>Décalage de réassemblage<output data-output="morphStagger"></output></span><input data-config="morphStagger" type="range" min="0" max="0.8" step="0.01" value="0.35"></label>
+        <label class="slider-control" data-model="morph" hidden><span>Durée de recomposition<output data-output="morphDuration"></output></span><input data-config="morphDuration" type="range" min="0.2" max="3" step="0.1" value="1.2"></label>
+        <label class="slider-control" data-model="morph" hidden><span>Seuil de luminosité<output data-output="morphThreshold"></output></span><input data-config="morphThreshold" type="range" min="0" max="0.4" step="0.01" value="0.04"></label>
+        <label class="slider-control" data-model="cymatics" hidden><span>Densité des grains<output data-output="cymDensity"></output></span><input data-config="cymDensity" type="range" min="100" max="360" step="10" value="220"></label>
+        <label class="slider-control" data-model="cymatics" hidden><span>Taille des grains<output data-output="cymSize"></output></span><input data-config="cymSize" type="range" min="0.2" max="1.4" step="0.01" value="0.55"></label>
+        <label class="slider-control" data-model="cymatics" hidden><span>Attraction vers les lignes<output data-output="cymAttraction"></output></span><input data-config="cymAttraction" type="range" min="0" max="1" step="0.01" value="0.85"></label>
+        <label class="slider-control" data-model="cymatics" hidden><span>Rotation du motif<output data-output="cymRotation"></output></span><input data-config="cymRotation" type="range" min="0" max="1" step="0.01" value="0.2"></label>
+        <label class="slider-control" data-model="cymatics" hidden><span>Photo en arrière-plan<output data-output="cymBackground"></output></span><input data-config="cymBackground" type="range" min="0" max="1" step="0.01" value="0.15"></label>
+        <label class="palette-control" data-model="cymatics" hidden><span>Motif d’ondes</span><select data-config="cymMode" aria-label="Motif d’ondes"><option value="0">2 × 1</option><option value="1" selected>3 × 2</option><option value="2">4 × 1</option><option value="3">5 × 2</option><option value="4">4 × 3</option><option value="5">5 × 1</option></select></label>
+        <label class="slider-control" data-hide-model="portal stereoGlow shards tessera fenestra shock codec corruption press spectrum quadtree vector chrono shear moire pegboard"><span>Vitesse du mouvement<output data-output="speed">100 %</output></span><input data-config="speed" type="range" min="0" max="1" step="0.01" value="1"></label>
+      </div>
+      <div class="control-group composition-controls"><div class="section-label">COMPOSITION</div><label><span>Changer d’image toutes les</span><select data-config="imageSeconds" aria-label="Durée par image"><option value="4">4 secondes</option><option value="8">8 secondes</option><option value="12" selected>12 secondes</option><option value="16">16 secondes</option><option value="24">24 secondes</option><option value="32">32 secondes</option></select></label><label><span>Cadrage des photos</span><select data-config="fit" aria-label="Cadrage des photos"><option value="cover">Remplir le cadre</option><option value="contain">Image entière</option></select></label></div>
+      <div class="settings-save">
+        <button id="save-settings-button" class="button primary" disabled>Sauvegarder les réglages</button>
+        <p id="settings-save-status" role="status">Sauvegarde partagée sur le serveur · tous vos navigateurs LAN.</p>
+        <button id="reset-button" class="quiet-button reset-button">↺ Valeurs d’origine du modèle</button>
+      </div>
+    </aside>
+  </main>
+  <audio id="audio" preload="metadata"></audio>
+  <dialog id="lan-dialog"><form method="dialog"><button class="dialog-close" aria-label="Fermer">×</button></form><span class="eyebrow">VOTRE STUDIO, SUR LE RÉSEAU</span><h2>Ouvrez le studio ailleurs.</h2><p>Depuis un appareil connecté au même réseau local :</p><div id="lan-addresses"></div><p class="muted">Cette machine doit rester allumée, avec le serveur démarré. Le réseau doit autoriser le port 5180.</p></dialog>
+  <dialog id="export-dialog"><form method="dialog"><button class="dialog-close" aria-label="Fermer">×</button></form><span class="eyebrow">03 / EXPORT</span><h2>Prêt pour le grand écran.</h2><p>Votre composition, calculée image par image.</p><div class="export-specs"><div><span>IMAGE</span><strong>1920 × 1080</strong><small>H.264 · Qualité élevée</small></div><div><span>AUDIO</span><strong>Stéréo · 48 kHz</strong><small>AAC · 384 kbit/s</small></div></div><label class="export-fps">Cadence<select id="export-fps"><option value="30">30 images / seconde</option><option value="60">60 images / seconde</option></select></label><p class="muted export-note">Le temps de calcul dépend de la durée et des effets. Vous pouvez continuer à utiliser l’aperçu.</p><button id="start-export" class="button primary">Lancer le rendu <span>↗</span></button><div id="export-progress" hidden><div class="progress-title"><strong id="export-message">Préparation…</strong><span id="export-percent">0 %</span></div><progress id="export-bar" max="100" value="0"></progress><div class="export-progress-footer"><span id="export-frames" class="muted"></span><button id="cancel-export" class="quiet-button">Annuler</button></div></div><a id="download-export" class="button primary" hidden>Télécharger le MP4 ↓</a></dialog>
+  <div id="toast" role="alert" hidden></div>
+  <script type="module" src="/app.js"></script>
+</body></html>

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Comparatif des effets — MusicFrame Render</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0b0e14;color:#e8edf5;font:16px "Segoe UI",sans-serif}main{max-width:1280px;margin:auto;padding:32px 24px}a{color:#c5f77d}header{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:24px}h1{font-size:28px;margin:0 0 8px}p{color:#98a5b8;line-height:1.6}.button{display:inline-block;padding:12px 18px;background:#c5f77d;color:#111822;text-decoration:none;border-radius:8px;font-weight:600;white-space:nowrap}video{display:block;width:100%;background:#05070a;aspect-ratio:16/9;border-radius:12px}progress{width:100%;height:12px;accent-color:#c5f77d}#chapters{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-top:24px}button{font:inherit;text-align:left;border:1px solid #2a3546;border-radius:8px;padding:12px;background:#151c27;color:#dbe4ef;cursor:pointer}button:hover{border-color:#c5f77d}button span{color:#9eaec4;margin-right:10px;font-variant-numeric:tabular-nums}[hidden]{display:none!important}
+</style></head><body><main>
+<header><div><h1 id="title">Comparatif des effets</h1><p id="format" style="margin:0">1920 × 1080 · 60 i/s · stéréo</p></div><a id="download" class="button" hidden>Télécharger le MP4</a></header>
+<p id="status">Chargement du rendu…</p><progress id="progress" max="100" value="0"></progress>
+<video id="video" controls preload="metadata" hidden></video><div id="chapters" hidden></div><p><a href="/">← Retour au studio</a></p>
+</main><script type="module">
+import {presets,presetNames} from './presets.js';
+const id=new URLSearchParams(location.search).get('id'),status=document.querySelector('#status'),progress=document.querySelector('#progress'),video=document.querySelector('#video');
+const label=t=>`${String(Math.floor(t/60)).padStart(2,'0')}:${String(t%60).padStart(2,'0')}`;
+async function refresh(){
+ try{
+  if(!/^[a-f0-9-]{36}$/.test(id||''))throw new Error('Identifiant du rendu manquant.');
+  const response=await fetch(`/api/exports/${id}`,{cache:'no-store'}),job=await response.json();if(!response.ok)throw new Error(job.error||'Rendu introuvable.');
+  progress.value=job.progress||0;
+  const count=job.chapters?.length||Object.keys(presets).length-1;
+  document.querySelector('#title').textContent=job.name||`${count} effets · un même spectre`;
+  const timing=job.transitionSeconds?`${job.holdSeconds} s seul + fondu ${job.transitionSeconds} s`:'7 secondes par effet';
+  document.querySelector('#format').textContent=`${timing} · ${job.durationSeconds||count*7} s · 1920 × 1080 · 60 i/s · stéréo`;
+  if(job.status==='error'||job.status==='cancelled')throw new Error(job.error||'Le rendu a été interrompu.');
+  if(job.status!=='completed'){const message=job.status==='rendering'?`Calcul des ${count} effets en 1080p60`:job.message;status.textContent=`${message} · ${job.progress||0} % · ${(job.frames||0).toLocaleString('fr')} / ${(job.totalFrames||count*420).toLocaleString('fr')} images`;setTimeout(refresh,5000);return;}
+  status.textContent=`Vidéo prête · ${(job.result.size/1024/1024).toFixed(1)} Mo. Choisissez un effet ci-dessous pour accéder à son passage.`;progress.hidden=true;
+  const url=job.downloadUrl||`/api/exports/${id}/download`;document.querySelector('#download').href=job.quicktimeDownloadUrl||url;document.querySelector('#download').textContent=job.quicktimeDownloadUrl?'Télécharger le QuickTime':'Télécharger le MP4';document.querySelector('#download').hidden=false;video.src=url;video.hidden=false;
+  const chapters=document.querySelector('#chapters');chapters.hidden=false;
+  const entries=job.chapters||Object.keys(presets).filter(key=>key!=='stereoGlow').map((key,i)=>({name:presetNames[key],start:i*7}));
+  entries.forEach(entry=>{const button=document.createElement('button'),time=document.createElement('span');time.textContent=label(entry.start);button.append(time,document.createTextNode(entry.name));button.addEventListener('click',()=>{video.currentTime=entry.start;void video.play().catch(()=>{});});chapters.append(button);});
+ }catch(error){status.textContent=error.message;progress.hidden=true;}
+}
+refresh();
+</script></body></html>

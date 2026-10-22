@@ -1,0 +1,9 @@
+node_modules/
+data/
+test-output/
+rd-demos/
+to_delete/
+Test Materiel/
+/cleanup-audit.json
+/NETTOYAGE.md
+*.log

@@ -1,0 +1,97 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Rendu MusicFrame Render</title>
+<script type="importmap">{"imports":{"three":"/lib/three/build/three.module.js"}}</script>
+<style>html,body{margin:0;background:#000}canvas{display:block;width:1920px;height:1080px}</style></head>
+<body><canvas id="output" width="1920" height="1080"></canvas><script type="module">
+import { VisualEngine } from '/engine.js';
+import { SequenceRenderer } from '/sequence-renderer.js';
+import {loadAnalysis} from '/analysis-loader.js';
+import {packRGB} from '/pack-rgb.js';
+const canvas=document.querySelector('canvas');
+let sequence, compositor, labeledCanvas, labeledContext;
+window.initializeRender=async(project,config,testSequence)=>{
+ const analysis=await loadAnalysis(project.analysisUrl);
+ window.engine=await new VisualEngine(canvas,1920,1080).initialize();
+ window.engine.setProject(project,analysis); window.engine.setConfig(config);
+ sequence=testSequence;
+ if(sequence){
+  compositor=new SequenceRenderer(window.engine,sequence);
+  labeledCanvas=document.createElement('canvas');labeledCanvas.width=1920;labeledCanvas.height=1080;labeledContext=labeledCanvas.getContext('2d');
+ }
+ const gl=window.engine.renderer.getContext(),debug=gl.getExtension('WEBGL_debug_renderer_info');
+ return {renderer:debug?gl.getParameter(debug.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER)};
+};
+async function drawOutput(time){
+ await window.engine.analysis.ensure?.(time,sequence?.spectrumConfig||window.engine.config);
+ let current;
+ if(sequence)current=await compositor.draw(time);
+ else await window.engine.draw(time);
+ if(!sequence||sequence.labels===false)return canvas;
+ if(!labeledCanvas){labeledCanvas=document.createElement('canvas');labeledCanvas.width=1920;labeledCanvas.height=1080;labeledContext=labeledCanvas.getContext('2d');}
+ labeledContext.drawImage(canvas,0,0);
+ if(current&&current.elapsed<1.8){
+  const title=`${String(current.index+1).padStart(2,'0')} / ${sequence.segments.length}  ·  ${current.segment.name}`;
+  labeledContext.font='500 30px "Segoe UI",sans-serif';
+  const width=labeledContext.measureText(title).width+40;
+  labeledContext.fillStyle='rgba(8,12,20,.7)';labeledContext.fillRect(36,32,width,58);
+  labeledContext.fillStyle='#fff';labeledContext.fillText(title,56,71);
+ }
+ return labeledCanvas;
+}
+window.renderFrame=async time=>{const picture=await drawOutput(time);return picture.toDataURL('image/png').split(',')[1];};
+let rawPixels;
+window.pushRawFrame=async(time,url)=>{
+ const begin=performance.now();
+ const picture=await drawOutput(time);
+ const drawn=performance.now();
+ rawPixels??=new Uint8Array(1920*1080*4);
+ if(picture===canvas){const gl=window.engine.renderer.getContext();gl.readPixels(0,0,1920,1080,gl.RGBA,gl.UNSIGNED_BYTE,rawPixels);}
+ else{
+  const topDown=labeledContext.getImageData(0,0,1920,1080).data;
+  for(let y=0;y<1080;y++)rawPixels.set(topDown.subarray(y*7680,(y+1)*7680),(1079-y)*7680);
+ }
+ const read=performance.now();
+ const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:rawPixels});
+ if(!response.ok)throw new Error('Transmission du frame interrompue ('+response.status+').');
+ return {drawing:drawn-begin,readback:read-drawn,transfer:performance.now()-read};
+};
+window.renderRawFrames=async({startTime,total,fps,url,compression})=>{
+ const buffers=[new Uint8Array(1920*1080*4),new Uint8Array(1920*1080*4)];
+ const timings={drawing:0,readback:0,compression:0,transfer:0};let pending;
+ for(let frame=0;frame<total;frame++){
+  const began=performance.now(),picture=await drawOutput(startTime+frame/fps),drawn=performance.now(),pixels=buffers[frame%2];
+  if(picture===canvas){const gl=window.engine.renderer.getContext();gl.readPixels(0,0,1920,1080,gl.RGBA,gl.UNSIGNED_BYTE,pixels);}
+  else{const image=labeledContext.getImageData(0,0,1920,1080).data;for(let y=0;y<1080;y++)pixels.set(image.subarray(y*7680,(y+1)*7680),(1079-y)*7680);}
+  const read=performance.now();let body=pixels;
+  if(compression)body=await new Response(new Blob([pixels]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer();
+  const compressed=performance.now();
+  timings.drawing+=drawn-began;timings.readback+=read-drawn;timings.compression+=compressed-read;
+  // Render the next frame while the preceding frame is being encoded. At most
+  // two buffers exist, and frames reach FFmpeg in strict audio-time order.
+  await pending;
+  pending=(async()=>{const begin=performance.now();const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body});if(!response.ok)throw new Error('Transmission du frame interrompue ('+response.status+').');timings.transfer+=performance.now()-begin;})();
+  pending.catch(()=>{});
+ }
+ await pending;return timings;
+};
+window.renderSocketFrames=async({startTime,total,fps,url})=>{
+ const socket=new WebSocket(url);socket.binaryType='arraybuffer';
+ let rejectAck,resolveAck,acknowledged=0,closed=false;
+ const fail=()=>{closed=true;rejectAck?.(Error('Connexion de rendu interrompue.'));};
+ socket.addEventListener('close',fail);socket.addEventListener('error',fail);
+ await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',()=>reject(Error('Connexion de rendu impossible.')),{once:true});});
+ socket.addEventListener('message',event=>{if(Number(event.data)!==++acknowledged){rejectAck?.(Error('Ordre des images incorrect.'));return;}resolveAck?.();});
+ const pixels=new Uint8Array(1920*1080*4),buffers=[new Uint8Array(1920*1080*3),new Uint8Array(1920*1080*3)];
+ const timings={drawing:0,readback:0,compression:0,transfer:0};let pending;
+ try{
+  for(let frame=0;frame<total;frame++){
+   const began=performance.now(),picture=await drawOutput(startTime+frame/fps),drawn=performance.now();
+   if(picture===canvas){const gl=window.engine.renderer.getContext();gl.readPixels(0,0,1920,1080,gl.RGBA,gl.UNSIGNED_BYTE,pixels);}
+   else{const image=labeledContext.getImageData(0,0,1920,1080).data;for(let y=0;y<1080;y++)pixels.set(image.subarray(y*7680,(y+1)*7680),(1079-y)*7680);}
+   const rgb=packRGB(pixels,buffers[frame%2]);timings.drawing+=drawn-began;timings.readback+=performance.now()-drawn;
+   await pending;if(closed)throw Error('Connexion de rendu interrompue.');
+   const sent=performance.now();pending=new Promise((resolve,reject)=>{resolveAck=()=>{timings.transfer+=performance.now()-sent;resolve();};rejectAck=reject;socket.send(rgb);});pending.catch(()=>{});
+  }
+  await pending;return timings;
+ }finally{socket.close();}
+};
+</script></body></html>

@@ -1,0 +1,62 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {mkdtemp,readFile,writeFile,rm,mkdir} from 'node:fs/promises';
+import {createWriteStream} from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import sharp from 'sharp';
+import yazl from 'yazl';
+import {command,ffmpeg,ffprobe} from '../server/media.js';
+
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+test('WAV + ZIP production render works end-to-end with CPU fallback and resumable job metadata',{timeout:180000},async t=>{
+ const directory=await mkdtemp(path.join(os.tmpdir(),'musicframe-render-production-')),base='http://127.0.0.1:5192';
+ const wave=path.join(directory,'stereo.wav');
+ await command(ffmpeg,['-v','error','-y','-f','lavfi','-i','sine=frequency=440:duration=1','-f','lavfi','-i','sine=frequency=880:duration=1','-filter_complex','[0:a][1:a]amerge=inputs=2[a]','-map','[a]','-c:a','pcm_s24le',wave]);
+ const picture=await sharp({create:{width:640,height:360,channels:3,background:'#ff3020'}}).composite([{input:Buffer.from('<svg width="640" height="360"><rect y="180" width="640" height="180" fill="#20bfff"/></svg>')}]).png().toBuffer();
+ const images=path.join(directory,'photos.zip'),zip=new yazl.ZipFile(),out=createWriteStream(images),done=once(out,'close');zip.outputStream.pipe(out);zip.addBuffer(picture,'image.png');zip.end();await done;
+ const data=path.join(directory,'data');await mkdir(path.join(data,'exports'),{recursive:true});
+ const interruptedId='11111111-1111-4111-8111-111111111111';await writeFile(path.join(data,'exports',interruptedId+'.json'),JSON.stringify({id:interruptedId,kind:'production',status:'rendering'}));
+ const server=spawn(process.execPath,['server/index.js'],{cwd:process.cwd(),windowsHide:true,env:{...process.env,PORT:'5192',HOST:'127.0.0.1',DATA_DIR:data,VISUALIZER_GPU:'off',VISUALIZER_ENCODER:'cpu',VISUALIZER_PACKED_ANALYSIS:'1'},stdio:['ignore','pipe','pipe']});
+ let logs='';server.stdout.on('data',s=>logs+=s);server.stderr.on('data',s=>logs+=s);
+ t.after(async()=>{if(server.exitCode===null){server.kill();await once(server,'exit').catch(()=>{});}await rm(directory,{recursive:true,force:true});});
+ let ready=false;for(let i=0;i<100;i++){try{if((await fetch(base+'/api/service')).ok){ready=true;break;}}catch{}await wait(200);}assert.ok(ready,logs);
+ assert.equal((await(await fetch(base+'/api/exports/'+interruptedId)).json()).status,'interrupted');
+ const home=await(await fetch(base+'/')).text();assert.match(home,/Import Audio/);assert.match(home,/Import Images/);assert.match(home,/id="render"/);assert.doesNotMatch(home,/data-preset=/);
+ const form=new FormData();form.append('audio',new Blob([await readFile(wave)]),'stereo.wav');form.append('images',new Blob([await readFile(images)]),'photos.zip');
+ const response=await fetch(base+'/api/projects',{method:'POST',headers:{'X-Visualizer-Mode':'production'},body:form});assert.equal(response.status,202,await response.clone().text());let project=await response.json();
+ for(let i=0;i<120&&project.status==='processing';i++){await wait(150);project=await(await fetch(base+'/api/projects/'+project.id)).json();}
+ assert.equal(project.status,'ready',project.error||logs);assert.equal(project.audio.format,'wav');assert.match(project.audioUrl,/audio\.wav$/);
+ assert.equal((await(await fetch(base+project.audioUrl)).arrayBuffer()).byteLength,(await readFile(wave)).length);
+ const started=await Promise.all([0,1].map(()=>fetch(base+'/api/projects/'+project.id+'/render',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fps:30})})));
+ assert.deepEqual(started.map(r=>r.status).sort(),[202,409]);let job=await started.find(r=>r.status===202).json(),previous=0;
+ assert.equal((await(await fetch(base+'/api/service')).json()).activeJob.id,job.id);
+ for(let i=0;i<600&&['starting','rendering','encoding'].includes(job.status);i++){
+  await wait(200);job=await(await fetch(base+'/api/exports/'+job.id)).json();assert.ok(job.progress>=previous);previous=job.progress;
+ }
+ assert.equal(job.status,'completed',JSON.stringify(job)+logs);assert.equal(job.graphics,'cpu');assert.equal(job.encoder,'libx264');assert.equal(job.transport,'rgba-websocket');assert.equal(job.frames,60);assert.equal(job.effects,20);assert.equal(job.transitionSeconds,3);assert.equal(job.result.fps,60);
+ const file=path.join(data,'exports',job.id+'.mp4'),probe=JSON.parse(await command(ffprobe,['-v','error','-show_streams','-show_format','-of','json',file]));
+ const v=probe.streams.find(s=>s.codec_type==='video'),a=probe.streams.find(s=>s.codec_type==='audio');assert.equal(v.width,1920);assert.equal(v.height,1080);assert.equal(v.nb_frames,'60');assert.equal(v.avg_frame_rate,'60/1');assert.equal(v.pix_fmt,'yuv420p');assert.equal(v.profile,'High');assert.equal(v.color_space,'bt709');assert.equal(v.color_range,'tv');assert.equal(a.channels,2);assert.equal(a.sample_rate,'48000');assert.ok(Math.abs(Number(probe.format.duration)-1)<.08);
+ const frame=await command(ffmpeg,['-v','error','-i',file,'-frames:v','1','-f','image2pipe','-vcodec','png','pipe:1']);
+ const region=async top=>sharp(await sharp(frame).extract({left:100,top,width:100,height:100}).toBuffer()).stats();
+ const top=await region(100),bottom=await region(850);
+ assert.ok(top.channels[0].mean>top.channels[2].mean+70,'Raw frames must retain their vertical orientation.');assert.ok(bottom.channels[2].mean>bottom.channels[0].mean+60);
+ const recipe=JSON.parse(await readFile(path.join(data,'exports',job.id+'.recipe.json'),'utf8'));assert.equal(recipe.sequence.repeat,true);assert.equal(recipe.sequence.labels,false);assert.equal(recipe.sequence.segments.length,20);assert.deepEqual(recipe.sequence.imageOrder,[0]);
+ assert.ok(recipe.sequence.segments.every(segment=>segment.config.audioResponse==='balanced-v1'));
+ const download=await fetch(base+job.downloadUrl,{headers:{Range:'bytes=0-1023'}});assert.equal(download.status,206);assert.equal(download.headers.get('content-type'),'video/mp4');await download.arrayBuffer();
+ const preparing=await(await fetch(base+'/api/projects',{method:'POST',headers:{'X-Visualizer-Mode':'production'},body:form})).json();
+ assert.equal((await fetch(base+'/api/projects/'+preparing.id+'/cancel',{method:'POST'})).status,200);
+ let preparation;for(let i=0;i<100;i++){preparation=await(await fetch(base+'/api/projects/'+preparing.id)).json();if(preparation.status!=='processing')break;await wait(100);}assert.equal(preparation.status,'cancelled');
+ const restarted=await(await fetch(base+'/api/projects/'+project.id+'/render',{method:'POST'})).json();
+ assert.equal((await fetch(base+'/api/cache/clear',{method:'POST'})).status,409);
+ assert.equal((await fetch(base+'/api/exports/'+restarted.id+'/cancel',{method:'POST'})).status,200);
+ let stopped;for(let i=0;i<100;i++){stopped=await(await fetch(base+'/api/exports/'+restarted.id)).json();if(stopped.status==='cancelled')break;await wait(100);}assert.equal(stopped.status,'cancelled');
+ const cleared=await fetch(base+'/api/cache/clear',{method:'POST'});assert.equal(cleared.status,200,await cleared.clone().text());assert.ok((await cleared.json()).bytes>0);
+ assert.equal((await fetch(base+job.downloadUrl,{headers:{Range:'bytes=0-1023'}})).status,404,'Factory reset must remove completed videos.');
+ assert.equal((await(await fetch(base+'/api/service')).json()).latestCompletedJob,null);
+ assert.equal((await fetch(base+'/api/projects/'+project.id)).status,404,'Cached production inputs must be removed.');
+ assert.equal((await fetch(base+'/api/projects/'+preparing.id)).status,404,'Stopped imports must also be removed.');
+ console.log('Production WAV → MP4 1080p60 stéréo : '+job.renderFps+' i/s de calcul en repli CPU.');
+});

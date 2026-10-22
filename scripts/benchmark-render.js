@@ -1,0 +1,14 @@
+import {readFile,writeFile,mkdir} from 'node:fs/promises';
+import path from 'node:path';
+import {renderVideo} from '../server/render.js';
+import {buildProductionSequence} from '../server/production-sequence.js';
+import {projectAudioPath} from '../server/project-paths.js';
+const base='http://127.0.0.1:5180';
+const reference=(await(await fetch(base+'/api/reference')).json()).project;
+const stored=JSON.parse(await readFile(path.join('data/projects',reference.id,'project.json'),'utf8'));
+const saved=JSON.parse(await readFile('data/saved-settings.json','utf8')).presets;
+const duration=Number(process.env.BENCH_SECONDS||1),startTime=Number(process.env.BENCH_START||0),socket=process.env.BENCH_TRANSPORT!=='http';
+const project={...reference,audio:{...reference.audio,duration},audioPath:projectAudioPath(stored,path.resolve('data/projects',reference.id))},sequence=buildProductionSequence(project,saved);
+const name=process.env.BENCH_NAME||'websocket',directory=path.resolve('test-output/optimization');await mkdir(directory,{recursive:true});
+const job={},result=await renderVideo({job,project,config:sequence.segments[0].config,sequence,output:path.join(directory,name+'.mp4'),baseUrl:base,hardware:'auto',raw:true,youtube:true,socket,startTime});
+await writeFile(path.join(directory,name+'.json'),JSON.stringify({result,job},null,2));console.log(JSON.stringify({name,result,renderFps:job.renderFps,seconds:job.renderSeconds,timings:job.timings}));

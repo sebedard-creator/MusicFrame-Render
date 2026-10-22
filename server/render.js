@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { performance } from 'node:perf_hooks';
-import { chromium } from 'playwright';
+import { launchRenderBrowser } from './render-browser.js';
 import { ffmpeg, command, ffprobe } from './media.js';
 import { videoEncodingArgs } from './video-encoding.js';
 import { rawFrameTransport } from './raw-frame-transport.js';
@@ -18,8 +18,7 @@ export async function renderVideo({ job, project, config, output, baseUrl, start
     async function prepare(useHardware){
       if(cancelled)throw cancelledError();
       renderErrors.length=0;
-      const gpuArgs=process.platform==='win32'?['--use-angle=d3d11','--enable-gpu']:['--enable-gpu'];
-      browser=await chromium.launch({headless:true,args:useHardware?gpuArgs:['--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+      browser=await launchRenderBrowser(useHardware);
       if(cancelled)throw cancelledError();
       const page=await browser.newPage({viewport:{width:1920,height:1080},deviceScaleFactor:1});
       page.setDefaultTimeout(0); // Long analysis loads and full-song calculations have no 30 s deadline.

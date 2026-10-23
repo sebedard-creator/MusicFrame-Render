@@ -30,7 +30,7 @@ export async function rawFrameTransport(stdin,origin,width=1920,height=1080,{onF
       if(frame.length!==expected)throw Error('Frame incomplet.');
       // One bounded frame write avoids hundreds of tiny Windows pipe flushes.
       if(!stdin.write(frame))await once(stdin,'drain');
-      onFrame?.();
+      await onFrame?.();
       res.writeHead(204).end();
     })().catch(error=>{failure=error;if(!res.headersSent)res.writeHead(500);res.end();}).finally(()=>{busy=false;});
   });

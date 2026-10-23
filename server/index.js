@@ -15,6 +15,7 @@ import { RenderService } from './render-service.js';
 import { writeAtomicJson } from './atomic-json.js';
 import {clearCache} from './cache.js';
 import {projectAudioPath} from './project-paths.js';
+import {activeRenderStates} from './render-pause.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const data = path.resolve(process.env.DATA_DIR || path.join(root, 'data'));
@@ -84,13 +85,13 @@ const production=new RenderService({directory:outputsDir,baseUrl:`http://127.0.0
 for(const file of await readdir(outputsDir)){
   if(!/^[0-9a-f-]{36}\.json$/.test(file))continue;
   try{const job=JSON.parse(await readFile(path.join(outputsDir,file),'utf8'));
-    if(job.kind==='production'&&['starting','rendering','encoding'].includes(job.status)){job.status='interrupted';job.error='The server stopped during rendering. Please start the render again.';await writeAtomicJson(path.join(outputsDir,file),job);}
+    if(job.kind==='production'&&activeRenderStates.includes(job.status)){job.status='interrupted';job.error='The server stopped during rendering. Please start the render again.';await writeAtomicJson(path.join(outputsDir,file),job);}
     if(job.kind==='production')jobs.set(job.id,job);
   }catch(error){console.error('Lecture du suivi : '+error.message);}
 }
 app.get('/api/service',(req,res)=>{
   res.setHeader('Cache-Control','no-store');
-  const active=[...jobs.values()].find(job=>['starting','rendering','encoding'].includes(job.status));
+  const active=[...jobs.values()].find(job=>activeRenderStates.includes(job.status));
   const completed=[...jobs.values()].filter(job=>job.kind==='production'&&job.status==='completed').sort((a,b)=>b.createdAt.localeCompare(a.createdAt))[0];
   res.json({ready:toolsReady,format:{width:1920,height:1080,fps:60,channels:2},activeJob:active?{id:active.id,projectId:active.projectId}:null,latestCompletedJob:completed?{id:completed.id,projectId:completed.projectId}:null});
 });
@@ -181,7 +182,7 @@ app.post('/api/projects/:id/cancel',async(req,res)=>{
  project.cancelRequested=true;project.message='Stopping the upload';importControllers.get(project.id)?.abort();analysisWorkers.get(project.id)?.postMessage('cancel');res.json({ok:true});
 });
 app.post('/api/cache/clear',async(req,res)=>{
- if(cacheClearing||importsInFlight||mutationsInFlight||exportStarting||[...jobs.values()].some(j=>['starting','rendering','encoding'].includes(j.status)))return res.status(409).json({error:'Wait for current operations to finish or stop the render before clearing the cache.'});
+ if(cacheClearing||importsInFlight||mutationsInFlight||exportStarting||[...jobs.values()].some(j=>activeRenderStates.includes(j.status)))return res.status(409).json({error:'Wait for current operations to finish or stop the render before clearing the cache.'});
  cacheClearing=true;try{await Promise.all([...production.pending,savedSettings.pending]);res.json(await clearCache({data,projects,jobs}));}catch(error){res.status(500).json({error:error.message});}finally{cacheClearing=false;}
 });
 app.put('/api/projects/:id/config', async (req, res, next) => {
@@ -207,14 +208,14 @@ app.get('/api/projects/:id/images/:file', (req, res) => {
 app.post('/api/projects/:id/render',async(req,res)=>{
   if(cacheClearing)return res.status(409).json({error:'Cache clearing is in progress.'});
   if(!toolsReady)return res.status(503).json({error:'The video engine is unavailable on the server.'});
-  if(exportStarting||[...jobs.values()].some(job=>['starting','rendering','encoding'].includes(job.status)))return res.status(409).json({error:'A render is already running. Wait for it to finish.'});
+  if(exportStarting||[...jobs.values()].some(job=>activeRenderStates.includes(job.status)))return res.status(409).json({error:'A render is already running. Wait for it to finish.'});
   exportStarting=true;
   try{const project=await getProject(req.params.id);if(project?.status!=='ready')return res.status(400).json({error:'Upload your files first.'});const job=await production.start(project);res.status(202).json({...job,cancel:undefined});}
   catch(error){res.status(400).json({error:error.message});}finally{exportStarting=false;}
 });
 app.post('/api/projects/:id/exports', async (req, res) => {
   if(cacheClearing)return res.status(409).json({error:'Cache clearing is in progress.'});
-  if (exportStarting||[...jobs.values()].some(job => ['starting', 'rendering', 'encoding'].includes(job.status))) return res.status(409).json({ error: 'An export is already running. Wait for it to finish or stop it.' });
+  if (exportStarting||[...jobs.values()].some(job => activeRenderStates.includes(job.status))) return res.status(409).json({ error: 'An export is already running. Wait for it to finish or stop it.' });
   exportStarting=true;
   try {
     const project = await getProject(req.params.id);
@@ -239,11 +240,16 @@ app.get('/api/exports/:id', async (req, res) => {
   if (!job) return res.status(404).json({ error: 'Export not found.' });
   const outputBytes=job.result?.size??(validId(req.params.id)?await stat(path.join(outputsDir,`${req.params.id}.mp4`)).then(file=>file.size,()=>null):null);
   res.setHeader('Cache-Control','no-store');
-  res.json({ ...job, cancel: undefined, outputBytes });
+  res.json({ ...job, cancel: undefined, pause: undefined, resume: undefined, pauseSupported: typeof job.pause === 'function', outputBytes });
+});
+for(const action of ['pause','resume'])app.post('/api/exports/:id/'+action,(req,res)=>{
+  const job=jobs.get(req.params.id);
+  if(!job||!['rendering','paused'].includes(job.status)||typeof job[action]!=='function')return res.status(409).json({error:'Pause is available while rendering frames. This render may require a server update after it finishes.'});
+  job[action]();res.json({ok:true,status:job.status});
 });
 app.post('/api/exports/:id/cancel', (req, res) => {
   const job = jobs.get(req.params.id);
-  if (!job || !['starting', 'rendering', 'encoding'].includes(job.status)) return res.status(404).json({ error: 'There is no active export to stop.' });
+  if (!job || !activeRenderStates.includes(job.status)) return res.status(404).json({ error: 'There is no active export to stop.' });
   job.cancelRequested = true; job.cancel?.(); res.json({ ok: true });
 });
 app.get('/api/exports/:id/download', async (req, res) => {

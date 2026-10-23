@@ -12,7 +12,7 @@ Transform music and photos into audio-reactive videos in just two clicks. MusicF
 - **Balanced audio response** combining the original motion intensity with adaptive dynamics, including in heavily limited recordings.
 - **Long-form rendering:** tracks up to 12 hours and ZIP archives containing up to 300 images, subject to available storage.
 - **Hardware acceleration:** GPU rendering and optional NVIDIA NVENC encoding, with automatic CPU fallback. Frames stay synchronized regardless of processing speed.
-- **Progress, time estimates, Stop and Clear cache**, plus server-side presets shared across browsers.
+- **Progress, time and total file size estimates, Pause/Resume, Stop and Clear cache**, plus server-side presets shared across browsers.
 
 ## Usage
 
@@ -25,6 +25,8 @@ Open **http://localhost:5180** or the LAN address printed at startup. Intended f
 3. **Render** — follow progress and download the finished MP4.
 
 Rendering continues when the browser closes; keep the server running. One render runs at a time. The optional preset studio is available at `/studio.html`.
+
+**Pause** finishes the current frame and lets the encoder drain its queue. **Resume** continues the same render without changing its quality. Keep the server and computer running while paused; the pause is held in memory. The total file size estimate uses approximately 2 GB per 10 minutes; the actual size depends on the visuals.
 
 ## Output and storage
 

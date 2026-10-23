@@ -7,11 +7,12 @@ import { videoEncodingArgs } from './video-encoding.js';
 import { rawFrameTransport } from './raw-frame-transport.js';
 import { selectEncoder } from './render-capabilities.js';
 import { frameSocket } from './frame-socket.js';
+import { createRenderPause } from './render-pause.js';
 
 export async function renderVideo({ job, project, config, output, baseUrl, startTime=0, sequence, hardware=false, captureFrame, raw=false, youtube=false, videoEncoder='auto', rawCompression=true, socket=true }) {
   if(!Number.isFinite(startTime)||startTime<0)throw new Error('Invalid render start time.');
-  let browser,encoder,transport,stderr='',cancelled=false;
-  job.cancel=()=>{cancelled=true;encoder?.kill();browser?.close().catch(()=>{});};
+  let browser,encoder,transport,pauseControl,stderr='',cancelled=false;
+  job.cancel=()=>{cancelled=true;pauseControl?.dispose();encoder?.kill();browser?.close().catch(()=>{});};
   const cancelledError=()=>new Error('Export cancelled.');
   try{
     const renderErrors=[];
@@ -38,15 +39,18 @@ export async function renderVideo({ job, project, config, output, baseUrl, start
     const filters=[...(raw?['vflip']:[]),...(youtube?['scale=in_range=pc:out_range=tv:out_color_matrix=bt709','format=yuv420p']:[])];
     encoder=spawn(ffmpeg,['-v','error','-y',...input,'-i','pipe:0',...(startTime>0?['-ss',String(startTime)]:[]),'-t',String(project.audio.duration),'-i',project.audioPath,'-map','0:v:0','-map','1:a:0',...(filters.length?['-vf',filters.join(',')]:[]),...videoEncodingArgs(config.fps,{encoder:job.encoder,youtube}),'-c:a','aac','-b:a','384k','-ar','48000','-ac','2',...(youtube?['-use_editlist','0','-avoid_negative_ts','make_zero']:['-t',String(project.audio.duration)]),'-movflags','+faststart',output],{windowsHide:true,stdio:['pipe','ignore','pipe']});
     const completion=new Promise((resolve,reject)=>{encoder.on('error',reject);encoder.on('close',code=>code===0?resolve():reject(new Error(cancelled?'Export cancelled.':stderr||'Video encoding failed.')));});
-    completion.catch(()=>{});encoder.stdin.on('error',()=>{});encoder.stderr.on('data',data=>{stderr=(stderr+data).slice(-4000);});
+    completion.catch(()=>pauseControl?.dispose());encoder.stdin.on('error',()=>{});encoder.stderr.on('data',data=>{stderr=(stderr+data).slice(-4000);});
     const total=Math.ceil(project.audio.duration*config.fps),started=performance.now();
     job.totalFrames=total;job.status='rendering';job.message='Rendering your video';
-    const markFrame=()=>{
+    pauseControl=createRenderPause(job);
+    const markFrame=async()=>{
       if(cancelled)throw cancelledError();
       if(renderErrors.length)throw new Error('Rendering error: '+renderErrors.join('\n').slice(0,3000));
       job.frames=(job.frames||0)+1;job.progress=Math.round(job.frames/total*95);
-      const elapsed=(performance.now()-started)/1000;job.renderFps=Math.round(job.frames/elapsed*10)/10;
+      const elapsed=pauseControl.elapsed(started);job.renderFps=Math.round(job.frames/Math.max(.001,elapsed)*10)/10;
       job.remainingSeconds=job.frames>=30?Math.ceil((total-job.frames)/Math.max(.01,job.renderFps)):null;
+      await pauseControl.wait();
+      if(cancelled)throw cancelledError();
     };
     job.frames=0;
     if(raw&&!captureFrame){
@@ -57,6 +61,7 @@ export async function renderVideo({ job, project, config, output, baseUrl, start
     }else{
     if(raw)transport=await rawFrameTransport(encoder.stdin,new URL(baseUrl).origin);
     for(let frame=0;frame<total;frame++){
+      await pauseControl.wait();
       if(cancelled)throw cancelledError();
       const time=startTime+frame/config.fps;
       if(raw){
@@ -70,13 +75,10 @@ export async function renderVideo({ job, project, config, output, baseUrl, start
         if(encoder.exitCode!==null||encoder.stdin.destroyed)throw new Error(stderr||'The video encoder stopped.');
         if(!encoder.stdin.write(frameData))await once(encoder.stdin,'drain');
       }
-      if(renderErrors.length)throw new Error('Rendering error: '+renderErrors.join('\n').slice(0,3000));
-      job.frames=frame+1;job.progress=Math.round((frame+1)/total*95);
-      const elapsed=(performance.now()-started)/1000;job.renderFps=Math.round(job.frames/elapsed*10)/10;
-      job.remainingSeconds=job.frames>=30?Math.ceil((total-job.frames)/Math.max(.01,job.renderFps)):null;
+      await markFrame();
     }
     }
-    job.renderSeconds=(performance.now()-started)/1000;job.remainingSeconds=0;
+    job.renderSeconds=pauseControl.elapsed(started);job.remainingSeconds=0;pauseControl.dispose();
     job.status='encoding';job.message='Finalizing the MP4';encoder.stdin.end();await completion;
     if(cancelled)throw cancelledError();
     const result=JSON.parse(await command(ffprobe,['-v','error','-show_streams','-show_format','-of','json',output]));
@@ -84,6 +86,7 @@ export async function renderVideo({ job, project, config, output, baseUrl, start
     if(video?.width!==1920||video?.height!==1080||audio?.channels!==2||video.avg_frame_rate!==config.fps+'/1'||Number(video.nb_frames)!==total)throw new Error('The exported video failed validation.');
     return {width:video.width,height:video.height,channels:audio.channels,fps:config.fps,frames:total,duration:Number(result.format.duration),size:Number(result.format.size),codec:video.codec_name};
   }finally{
+    pauseControl?.dispose();
     if(encoder&&encoder.exitCode===null)encoder.kill();
     await transport?.close().catch(()=>{});await browser?.close().catch(()=>{});delete job.cancel;
   }

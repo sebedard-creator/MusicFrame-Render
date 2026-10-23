@@ -1,12 +1,12 @@
-// MB are decimal megabytes; the duration is video time, not rendering time.
-export function averageSizePerTenMinutes(job) {
-  const estimated = ['rendering', 'encoding'].includes(job.status);
-  if (!estimated && job.status !== 'completed') return null;
-  const bytes = estimated ? job.outputBytes : job.result?.size;
-  const seconds = estimated
-    ? Math.min(job.durationSeconds || Infinity, job.frames / job.fps)
-    : job.result?.duration;
-  if (!Number.isFinite(bytes) || bytes <= 0 || !Number.isFinite(seconds) || seconds <= 0) return null;
-  if (estimated && seconds < 30) return null;
-  return { megabytes: bytes / 1_000_000 * 600 / seconds, estimated };
+// Decimal GB, using the agreed planning estimate of 2 GB per 10 minutes.
+// Rendering time and already-written bytes do not change the track duration.
+export function estimatedOutputSize(job) {
+  if (job.status === 'completed') {
+    const bytes = job.result?.size;
+    return Number.isFinite(bytes) && bytes > 0 ? {bytes, estimated: false} : null;
+  }
+  if (!['starting', 'rendering', 'paused', 'encoding'].includes(job.status)) return null;
+  const seconds = job.durationSeconds ?? job.totalFrames / job.fps;
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  return {bytes: seconds / 600 * 2_000_000_000, estimated: true};
 }

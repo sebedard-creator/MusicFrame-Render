@@ -21,7 +21,7 @@ export async function frameSocket(stdin,origin,width=1920,height=1080,{onFrame,c
     void(async()=>{
      if(stdin.destroyed)throw Error('Encodeur arrêté.');
      if(!stdin.write(frame))await once(stdin,'drain');
-     onFrame?.();ws.send(String(++received));
+     await onFrame?.();ws.send(String(++received));
     })().catch(error=>{failure=error;ws.close(1011);}).finally(()=>{busy=false;});
    });
   });

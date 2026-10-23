@@ -19,11 +19,13 @@ test('WAV + ZIP production render works end-to-end with CPU fallback and resumab
  const images=path.join(directory,'photos.zip'),zip=new yazl.ZipFile(),out=createWriteStream(images),done=once(out,'close');zip.outputStream.pipe(out);zip.addBuffer(picture,'image.png');zip.end();await done;
  const data=path.join(directory,'data');await mkdir(path.join(data,'exports'),{recursive:true});
  const interruptedId='11111111-1111-4111-8111-111111111111';await writeFile(path.join(data,'exports',interruptedId+'.json'),JSON.stringify({id:interruptedId,kind:'production',status:'rendering'}));
+ const pausedId='22222222-2222-4222-8222-222222222222';await writeFile(path.join(data,'exports',pausedId+'.json'),JSON.stringify({id:pausedId,kind:'production',status:'paused'}));
  const server=spawn(process.execPath,['server/index.js'],{cwd:process.cwd(),windowsHide:true,env:{...process.env,PORT:'5192',HOST:'127.0.0.1',DATA_DIR:data,VISUALIZER_GPU:'off',VISUALIZER_ENCODER:'cpu',VISUALIZER_PACKED_ANALYSIS:'1'},stdio:['ignore','pipe','pipe']});
  let logs='';server.stdout.on('data',s=>logs+=s);server.stderr.on('data',s=>logs+=s);
  t.after(async()=>{if(server.exitCode===null){server.kill();await once(server,'exit').catch(()=>{});}await rm(directory,{recursive:true,force:true});});
  let ready=false;for(let i=0;i<100;i++){try{if((await fetch(base+'/api/service')).ok){ready=true;break;}}catch{}await wait(200);}assert.ok(ready,logs);
  assert.equal((await(await fetch(base+'/api/exports/'+interruptedId)).json()).status,'interrupted');
+ assert.equal((await(await fetch(base+'/api/exports/'+pausedId)).json()).status,'interrupted','An in-memory pause cannot survive a server restart.');
  const home=await(await fetch(base+'/')).text();assert.match(home,/Import Audio/);assert.match(home,/Import Images/);assert.match(home,/id="render"/);assert.doesNotMatch(home,/data-preset=/);
  const form=new FormData();form.append('audio',new Blob([await readFile(wave)]),'stereo.wav');form.append('images',new Blob([await readFile(images)]),'photos.zip');
  const response=await fetch(base+'/api/projects',{method:'POST',headers:{'X-Visualizer-Mode':'production'},body:form});assert.equal(response.status,202,await response.clone().text());let project=await response.json();
@@ -33,9 +35,21 @@ test('WAV + ZIP production render works end-to-end with CPU fallback and resumab
  const started=await Promise.all([0,1].map(()=>fetch(base+'/api/projects/'+project.id+'/render',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fps:30})})));
  assert.deepEqual(started.map(r=>r.status).sort(),[202,409]);let job=await started.find(r=>r.status===202).json(),previous=0;
  assert.equal((await(await fetch(base+'/api/service')).json()).activeJob.id,job.id);
+ let didPause=false;
  for(let i=0;i<600&&['starting','rendering','encoding'].includes(job.status);i++){
   await wait(200);job=await(await fetch(base+'/api/exports/'+job.id)).json();assert.ok(job.progress>=previous);previous=job.progress;
+  if(!didPause&&job.pauseSupported&&job.frames>=2&&job.frames<50){
+   const control=action=>fetch(base+'/api/exports/'+job.id+'/'+action,{method:'POST'});
+   assert.equal((await control('pause')).status,200);assert.equal((await control('pause')).status,200);
+   await wait(500);const paused=await(await fetch(base+'/api/exports/'+job.id)).json();
+   await wait(500);const held=await(await fetch(base+'/api/exports/'+job.id)).json();
+   assert.equal(held.status,'paused');assert.equal(held.frames,paused.frames);assert.equal(held.progress,paused.progress);
+   assert.equal((await(await fetch(base+'/api/service')).json()).activeJob.id,job.id);
+   for(const url of ['/api/cache/clear','/api/projects/'+project.id+'/render','/api/projects/'+project.id+'/exports'])assert.equal((await fetch(base+url,{method:'POST'})).status,409,'Paused work must block destructive or competing operations.');
+   assert.equal((await control('resume')).status,200);assert.equal((await control('resume')).status,200);didPause=true;
+  }
  }
+ assert.equal(didPause,true,'Exercise pause and resume during the actual video render.');
  assert.equal(job.status,'completed',JSON.stringify(job)+logs);assert.equal(job.graphics,'cpu');assert.equal(job.encoder,'libx264');assert.equal(job.transport,'rgba-websocket');assert.equal(job.frames,60);assert.equal(job.effects,20);assert.equal(job.transitionSeconds,3);assert.equal(job.result.fps,60);
  const file=path.join(data,'exports',job.id+'.mp4'),probe=JSON.parse(await command(ffprobe,['-v','error','-show_streams','-show_format','-of','json',file]));
  const v=probe.streams.find(s=>s.codec_type==='video'),a=probe.streams.find(s=>s.codec_type==='audio');assert.equal(v.width,1920);assert.equal(v.height,1080);assert.equal(v.nb_frames,'60');assert.equal(v.avg_frame_rate,'60/1');assert.equal(v.pix_fmt,'yuv420p');assert.equal(v.profile,'High');assert.equal(v.color_space,'bt709');assert.equal(v.color_range,'tv');assert.equal(a.channels,2);assert.equal(a.sample_rate,'48000');assert.ok(Math.abs(Number(probe.format.duration)-1)<.08);
@@ -51,6 +65,8 @@ test('WAV + ZIP production render works end-to-end with CPU fallback and resumab
  let preparation;for(let i=0;i<100;i++){preparation=await(await fetch(base+'/api/projects/'+preparing.id)).json();if(preparation.status!=='processing')break;await wait(100);}assert.equal(preparation.status,'cancelled');
  const restarted=await(await fetch(base+'/api/projects/'+project.id+'/render',{method:'POST'})).json();
  assert.equal((await fetch(base+'/api/cache/clear',{method:'POST'})).status,409);
+ for(let i=0;i<200;i++){const running=await(await fetch(base+'/api/exports/'+restarted.id)).json();if(running.pauseSupported){assert.equal((await fetch(base+'/api/exports/'+restarted.id+'/pause',{method:'POST'})).status,200);break;}await wait(50);}
+ assert.equal((await(await fetch(base+'/api/exports/'+restarted.id)).json()).status,'paused');
  assert.equal((await fetch(base+'/api/exports/'+restarted.id+'/cancel',{method:'POST'})).status,200);
  let stopped;for(let i=0;i<100;i++){stopped=await(await fetch(base+'/api/exports/'+restarted.id)).json();if(stopped.status==='cancelled')break;await wait(100);}assert.equal(stopped.status,'cancelled');
  const cleared=await fetch(base+'/api/cache/clear',{method:'POST'});assert.equal(cleared.status,200,await cleared.clone().text());assert.ok((await cleared.json()).bytes>0);

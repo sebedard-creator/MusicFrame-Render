@@ -1,6 +1,7 @@
 node_modules/
 data/
 test-output/
+/public/render-progress-live/
 rd-demos/
 to_delete/
 Test Materiel/

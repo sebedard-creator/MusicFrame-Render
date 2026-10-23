@@ -4,6 +4,7 @@ import { gradientPresets, buildGradientLUT } from './vendor/fft-visualizer/gradi
 import { decodeStereoSpectrum, processStereoTrack, sampleStereoTrack, LightweightStereoSampler } from './stereo-spectrum.js';
 
 const gradients = ['mono', 'aurora', 'classic', 'rainbow', 'blue', 'prism', 'sunset'];
+const displayMaxHz = 16000;
 function spectrumTexture(data) {
   const texture = new THREE.DataTexture(data, data.length, 1, THREE.RedFormat);
   texture.minFilter = texture.magFilter = THREE.NearestFilter; texture.unpackAlignment = 1; texture.needsUpdate = true;
@@ -53,8 +54,13 @@ export class SpectrumOverlay {
     const palette = gradients[config.glowGradient ?? 0];
     if (palette !== this.palette) { this.gradient.image.data = buildGradientLUT(gradientPresets[palette]); this.gradient.needsUpdate = true; this.palette = palette; }
     const u = this.material.uniforms;
-    const w = width * .9, h = height * (config.glowHeight ?? .32), x = width * .05;
-    const y = (height - h) * (1 - (config.glowPosition ?? .92));
+    // Stretch complete frequency bands to the right edge, cropping the usually
+    // empty treble tail from the display only. Keep the underlying FFT intact.
+    const minHz = source.minHz ?? 30, maxHz = source.maxHz ?? 20000;
+    const visibleBands = config.glowRadial || config.glowRotation || maxHz <= displayMaxHz
+      ? bands : Math.max(1, Math.min(bands, Math.floor(bands * Math.log(displayMaxHz / minHz) / Math.log(maxHz / minHz))));
+    const w = width * bands / visibleBands, h = height * (config.glowHeight ?? .32), x = 0;
+    const y = (height - h) * (1 - (config.glowPosition ?? 1));
     u.u_resolution.value.set(w, h); u.u_origin.value.set(x, y); u.u_bins.value = bands; u.u_dpr.value = width / 1920;
     u.u_opacity.value = config.glowOpacity ?? 1; u.u_barSpace.value = config.glowSpace ?? .4;
     u.u_glow.value = config.glowLight ?? 1; u.u_stereo.value = !!(config.glowStereo ?? 1);
@@ -64,7 +70,7 @@ export class SpectrumOverlay {
     const autoClear = renderer.autoClear;
     try {
       renderer.autoClear = false; renderer.setViewport(x, y, w, h);
-      renderer.setScissor(x, y, w, h); renderer.setScissorTest(true);
+      renderer.setScissor(x, y, width, h); renderer.setScissorTest(true);
       renderer.render(this.scene, this.camera);
     } finally { renderer.setViewport(0, 0, width, height); renderer.setScissorTest(false); renderer.autoClear = autoClear; }
   }

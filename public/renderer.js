@@ -1,3 +1,4 @@
+import {averageSizePerTenMinutes} from './output-size.js';
 const $=selector=>document.querySelector(selector);
 const fields={audio:$('#audio-input'),images:$('#images-input')},files={};
 let busy=false,resetting=false,generation=0,currentJobId=null,currentProjectId=null,activeUpload=null,stopping=false;
@@ -6,12 +7,26 @@ const clock=seconds=>seconds>=3600?`${Math.floor(seconds/3600)} h ${String(Math.
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function api(url,options){const response=await fetch(url,{cache:'no-store',...options});const data=await response.json();if(!response.ok){const error=Error(data.error||'The server is not responding.');error.status=response.status;throw error;}return data;}
 function progress(value,message,detail=''){$('#progress').value=value;$('#percent').textContent=Math.round(value)+'%';$('#status').textContent=message;$('#detail').textContent=detail;}
+async function updateOutputSize(job){
+ let sample=job;
+ // Read-only compatibility sample for a render started before size reporting
+ // was added. This lets its server keep running until the export finishes.
+ if(job.outputBytes===undefined&&['rendering','encoding'].includes(job.status)){
+  try{const live=await api('/render-progress-live/'+job.id+'.json');
+   if(live.jobId===job.id&&Date.now()-live.sampledAt<30_000)sample={...job,outputBytes:live.outputBytes,frames:live.frames};
+  }catch{}
+ }
+ const average=averageSizePerTenMinutes(sample);$('#output-size').hidden=!average;
+ if(average){const gb=average.megabytes/1000;const size=gb<1?gb.toLocaleString('en-US',{maximumSignificantDigits:2}):Math.round(gb).toLocaleString('en-US');$('#output-size-value').textContent='Approx '+size+'GB/10Min';
+  $('#output-size').title=average.estimated?'Estimated size per 10 minutes of video, based on the frames rendered so far. The final average may vary.':'Final file size averaged over 10 minutes of video.';}
+}
 function setBusy(value){busy=value;const disabled=value||resetting;Object.values(fields).forEach(f=>f.disabled=disabled);document.querySelectorAll('.import').forEach(b=>b.disabled=disabled);$('#render').disabled=disabled||!files.audio||!files.images;$('#render-label').textContent=value?'Rendering…':'Render video';$('#stop').disabled=resetting||!value||stopping;$('#clear-cache').disabled=disabled;}
 function resetSelection(){
  generation++;currentJobId=null;currentProjectId=null;stopping=false;
  for(const key of ['musicframe-render-render-job','musicframe-render-render-project','musicframe-render-project','musicframe-render-export'])localStorage.removeItem(key);
  for(const kind of ['audio','images']){delete files[kind];fields[kind].value='';$('#'+kind+'-name').textContent='';$('#'+kind+'-button').classList.remove('selected','drag');}
  $('#result').hidden=true;$('#download').removeAttribute('href');$('#result-detail').textContent='';$('#error').hidden=true;
+ $('#output-size').hidden=true;
 }
 function fail(error){$('#error').textContent=error.message;$('#error').hidden=false;$('#status').textContent='Operation interrupted';setBusy(false);}
 function select(kind,file){
@@ -19,6 +34,7 @@ function select(kind,file){
  if(!valid){fail(Error(kind==='audio'?'Choose a WAV or MP3 file.':'Choose a ZIP archive of images.'));return;}
  if(file.size>16*1024**3){fail(Error('The file exceeds the 16 GB limit.'));return;}
  files[kind]=file;$('#'+kind+'-name').textContent=file.name+' · '+formatBytes(file.size);$('#'+kind+'-button').classList.add('selected');$('#error').hidden=true;$('#result').hidden=true;
+ $('#output-size').hidden=true;
  progress(0,files.audio&&files.images?'Ready to render':'Add your audio and images to get started');setBusy(false);
 }
 for(const kind of ['audio','images']){
@@ -41,6 +57,7 @@ async function watchRender(id,token){
  let failures=0;
  while(token===generation){
   let job;try{job=await api('/api/exports/'+id);failures=0;}catch(error){if(error.status===404)throw error;if(++failures<=5){$('#detail').textContent='Reconnecting to the server…';await wait(2000);continue;}throw error;}
+  await updateOutputSize(job);
   if(job.status==='completed'){
    progress(100,'Your video is ready',clock(job.result.duration)+' · '+formatBytes(job.result.size));$('#result').hidden=false;$('#download').href=job.downloadUrl;
    $('#result-detail').textContent='MP4 · 1920 × 1080 · 60 fps · stereo';setBusy(false);return;
@@ -62,6 +79,7 @@ async function continueProject(project,token){
 }
 $('#render').addEventListener('click',async()=>{
  if(busy||resetting||!files.audio||!files.images)return;currentJobId=null;currentProjectId=null;stopping=false;const token=++generation;$('#error').hidden=true;$('#result').hidden=true;setBusy(true);progress(0,'Uploading your files…');
+ $('#output-size').hidden=true;
  localStorage.removeItem('musicframe-render-render-job');localStorage.removeItem('musicframe-render-render-project');
  try{const project=await upload();if(token!==generation){await api('/api/projects/'+project.id+'/cancel',{method:'POST'}).catch(()=>{});return;}await continueProject(project,token);}catch(error){if(token===generation)fail(error);}
 });

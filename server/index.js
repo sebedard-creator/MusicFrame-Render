@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import { mkdir, readFile, writeFile, readdir, rename, unlink, rm } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir, rename, unlink, rm, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -237,7 +237,9 @@ app.get('/api/exports/:id', async (req, res) => {
   let job = jobs.get(req.params.id);
   if (!job && validId(req.params.id)) try { job = JSON.parse(await readFile(path.join(outputsDir, `${req.params.id}.json`), 'utf8')); } catch {}
   if (!job) return res.status(404).json({ error: 'Export not found.' });
-  res.json({ ...job, cancel: undefined });
+  const outputBytes=job.result?.size??(validId(req.params.id)?await stat(path.join(outputsDir,`${req.params.id}.mp4`)).then(file=>file.size,()=>null):null);
+  res.setHeader('Cache-Control','no-store');
+  res.json({ ...job, cancel: undefined, outputBytes });
 });
 app.post('/api/exports/:id/cancel', (req, res) => {
   const job = jobs.get(req.params.id);

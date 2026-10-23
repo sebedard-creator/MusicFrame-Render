@@ -3,7 +3,7 @@ import { presets, legacyPresets, photoModelIds } from '../public/presets.js';
 export const defaults = Object.freeze({
   audioResponse: 'legacy',
   engine: 'astrofox', preset: 'led', ...presets.led,
-  ...{"glowPhoto":0,"glowBands":80,"glowSpace":0.4,"glowLight":1,"glowStereo":1,"glowLed":0,"glowLumi":0,"glowRadial":0,"glowRotation":0,"glowPeaks":0,"glowPeakDrop":0.99,"glowGradient":0,"glowDirection":0,"glowColorMode":0,"glowFloor":65,"glowSmoothing":0.65,"glowGain":1,"glowHeight":0.32,"glowPosition":0.92,"glowOpacity":1},
+  ...{"glowPhoto":0,"glowBands":80,"glowSpace":0.4,"glowLight":1,"glowStereo":1,"glowLed":0,"glowLumi":0,"glowRadial":0,"glowRotation":0,"glowPeaks":0,"glowPeakDrop":0.99,"glowGradient":0,"glowDirection":0,"glowColorMode":0,"glowFloor":65,"glowSmoothing":0.65,"glowGain":1,"glowHeight":0.32,"glowPosition":1,"glowOpacity":1},
   imageSeconds: 12, fit: 'cover', fps: 60,
   ledSpacing: presets.led.ledSpacing, ledFill: presets.led.ledFill, ledGlow: presets.led.ledGlow,
   edgeThickness: legacyPresets.neon.edgeThickness, neonHue: legacyPresets.neon.neonHue, edgeBrightness: legacyPresets.neon.edgeBrightness,

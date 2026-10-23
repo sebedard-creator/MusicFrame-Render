@@ -40,7 +40,9 @@
   <div class="actions"><button type="button" id="stop" disabled><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1"/></svg>Stop</button><button type="button" id="clear-cache">Clear cache</button><span>Clears uploads and generated videos. Saved presets stay.</span></div>
   <section class="progress-panel" aria-label="Render status">
    <div class="progress-head" aria-live="polite"><span id="status">Add your audio and images to get started</span><span id="percent">0%</span></div>
-   <progress id="progress" max="100" value="0" aria-label="Rendering progress"></progress><p id="detail">Your video renders on your local server.</p><p id="error" role="alert" hidden></p>
+   <progress id="progress" max="100" value="0" aria-label="Rendering progress"></progress><p id="detail">Your video renders on your local server.</p>
+   <div class="render-metric" id="output-size" hidden><strong id="output-size-value"></strong></div>
+   <p id="error" role="alert" hidden></p>
   </section>
   <div id="result" hidden><span class="result-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><strong>Your video is ready.</strong><small id="result-detail"></small></div><a id="download" download><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2v10m-4-4 4 4 4-4M3 13v4h14v-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Download video</a></div>
  </section>
